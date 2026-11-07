@@ -72,6 +72,11 @@ QtObject {
     readonly property color secondaryContainer: m3secondaryContainer
     readonly property color onSecondaryContainer: m3onSecondaryContainer
 
+    readonly property color tertiary: m3tertiary
+    readonly property color onTertiary: m3onTertiary
+    readonly property color tertiaryContainer: m3tertiaryContainer
+    readonly property color onTertiaryContainer: m3onTertiaryContainer
+
     readonly property color background: m3background
     readonly property color onBackground: m3onBackground
 
@@ -98,10 +103,18 @@ QtObject {
 
     // --- Utility Methods ---
     function alpha(c: color, a: real): color {
+        if (!c)
+            return Qt.rgba(0, 0, 0, a);
         return Qt.rgba(c.r, c.g, c.b, a);
     }
 
-    // --- Design Tokens (Independent, 100% Caelestia Match) ---
+    // --- Design Tokens (Independent, 100% Caelestia Shell Match) ---
+    readonly property QtObject transparency: QtObject {
+        readonly property bool enabled: true
+        readonly property real base: 0.85
+        readonly property real layers: 0.40
+    }
+
     readonly property QtObject spacing: QtObject {
         readonly property int xs: 4
         readonly property int sm: 8
@@ -113,35 +126,46 @@ QtObject {
     }
 
     readonly property QtObject rounding: QtObject {
-        readonly property int xs: 6
-        readonly property int sm: 10
-        readonly property int md: 14
-        readonly property int lg: 18
-        readonly property int xl: 24
+        readonly property int xs: 4
+        readonly property int sm: 8
+        readonly property int md: 12
+        readonly property int lg: 16
+        readonly property int largeIncreased: 20
+        readonly property int xl: 28
+        readonly property int xxl: 32
+        readonly property int xxxl: 48
         readonly property int full: 9999
     }
 
     readonly property QtObject padding: QtObject {
-        readonly property int xs: 6
-        readonly property int sm: 10
-        readonly property int md: 14
-        readonly property int lg: 18
-        readonly property int xl: 22
-        readonly property int xxl: 28
+        readonly property int xs: 4
+        readonly property int sm: 8
+        readonly property int md: 12
+        readonly property int lg: 16
+        readonly property int xl: 20
+        readonly property int xxl: 24
+        readonly property int huge: 32
     }
 
     readonly property QtObject fonts: QtObject {
-        readonly property string family: "Noto Sans, sans-serif"
+        readonly property string family: "Google Sans Flex, sans-serif"
         readonly property string familyMono: "JetBrainsMono Nerd Font, monospace"
         readonly property string familyIcon: "Material Symbols Rounded"
 
-        readonly property int clock: 52
-        readonly property int display: 32
-        readonly property int headline: 22
-        readonly property int title: 16
-        readonly property int body: 13
-        readonly property int label: 11
-        readonly property int caption: 9
+        readonly property int clock: 54
+        readonly property int headlineLarge: 42
+        readonly property int headlineMedium: 37
+        readonly property int headlineSmall: 32
+        readonly property int titleLarge: 29
+        readonly property int titleMedium: 21
+        readonly property int titleSmall: 18
+        readonly property int bodyLarge: 21
+        readonly property int bodyMedium: 16
+        readonly property int bodySmall: 14
+        readonly property int labelLarge: 18
+        readonly property int labelMedium: 16
+        readonly property int labelSmall: 14
+        readonly property int caption: 11
     }
 
     readonly property QtObject anim: QtObject {
@@ -151,7 +175,7 @@ QtObject {
         readonly property int easingCurve: Easing.OutCubic
     }
 
-    // --- Dynamic File Watcher ---
+    // --- Dynamic File Watcher for Caelestia Theme Scheme ---
     readonly property FileView _fileView: FileView {
         path: Quickshell.env("HOME") + "/.local/state/caelestia/scheme.json"
         watchChanges: true

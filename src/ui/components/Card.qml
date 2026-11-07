@@ -6,13 +6,14 @@ import "../../theme"
 Rectangle {
     id: root
 
-    property real baseOpacity: 0.72
+    // Matches Caelestia's layer transparency (0.40) to let Hyprland frosted-glass blur show through
+    property real baseOpacity: Theme.transparency.layers + 0.05
     property bool hoverable: false
     readonly property bool isHovered: hoverArea.containsMouse
 
     color: Theme.alpha(Theme.surfaceContainer, baseOpacity)
-    radius: Theme.rounding.lg
-    border.color: Theme.alpha(Theme.outlineVariant, isHovered ? 0.6 : 0.3)
+    radius: Theme.rounding.xl
+    border.color: Theme.alpha(Theme.outlineVariant, isHovered ? 0.55 : 0.30)
     border.width: 1
 
     Behavior on color {

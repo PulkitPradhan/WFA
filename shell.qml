@@ -8,6 +8,12 @@ import "src/ui"
 ShellRoot {
     id: root
 
+    // Load Caelestia's exact typography (Google Sans Flex variable font)
+    FontLoader {
+        id: gsfLoader
+        source: Quickshell.shellPath("assets/fonts/GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf")
+    }
+
     DesktopLayer {
         id: desktopLayer
     }
