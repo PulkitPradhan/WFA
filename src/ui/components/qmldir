@@ -1,3 +1,5 @@
 Card 1.0 Card.qml
 StyledText 1.0 StyledText.qml
 Icon 1.0 Icon.qml
+AppIconTile 1.0 AppIconTile.qml
+SegmentedSwitch 1.0 SegmentedSwitch.qml

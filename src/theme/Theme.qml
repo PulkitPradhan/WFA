@@ -19,6 +19,7 @@ QtObject {
     property color m3onPrimary: "#000000"
     property color m3primaryContainer: "#392434"
     property color m3onPrimaryContainer: "#af9cc2"
+    property color m3primaryFixed: "#ad93ba"
 
     property color m3secondary: "#808080"
     property color m3onSecondary: "#000000"
@@ -63,24 +64,18 @@ QtObject {
 
     // --- Clean Convenience Aliases ---
     readonly property color primary: m3primary
-    readonly property color onPrimary: m3onPrimary
     readonly property color primaryContainer: m3primaryContainer
-    readonly property color onPrimaryContainer: m3onPrimaryContainer
+    readonly property color primaryFixed: m3primaryFixed
 
     readonly property color secondary: m3secondary
-    readonly property color onSecondary: m3onSecondary
     readonly property color secondaryContainer: m3secondaryContainer
-    readonly property color onSecondaryContainer: m3onSecondaryContainer
 
     readonly property color tertiary: m3tertiary
-    readonly property color onTertiary: m3onTertiary
     readonly property color tertiaryContainer: m3tertiaryContainer
-    readonly property color onTertiaryContainer: m3onTertiaryContainer
 
     readonly property color background: m3background
-    readonly property color onBackground: m3onBackground
 
-    readonly property color surface: m3surface
+    readonly property color surfaceColor: m3surface
     readonly property color surfaceDim: m3surfaceDim
     readonly property color surfaceBright: m3surfaceBright
     readonly property color surfaceContainerLowest: m3surfaceContainerLowest
@@ -88,10 +83,22 @@ QtObject {
     readonly property color surfaceContainer: m3surfaceContainer
     readonly property color surfaceContainerHigh: m3surfaceContainerHigh
     readonly property color surfaceContainerHighest: m3surfaceContainerHighest
-
-    readonly property color onSurface: m3onSurface
     readonly property color surfaceVariant: m3surfaceVariant
+
+    // Text / Foreground colors (Safe from QML on* signal clashes)
+    readonly property color text: m3onSurface
+    readonly property color textPrimary: m3onSurface
+    readonly property color textSecondary: m3onSurfaceVariant
+    readonly property color textMuted: m3onSurfaceVariant
+    readonly property color textOnPrimary: m3onPrimary
+    readonly property color textOnSecondary: m3onSecondary
+
+    // Direct palette access matching Caelestia
+    readonly property color onSurface: m3onSurface
     readonly property color onSurfaceVariant: m3onSurfaceVariant
+    readonly property color onPrimary: m3onPrimary
+    readonly property color onSecondary: m3onSecondary
+    readonly property color onBackground: m3onBackground
 
     readonly property color outline: m3outline
     readonly property color outlineVariant: m3outlineVariant
@@ -148,24 +155,18 @@ QtObject {
     }
 
     readonly property QtObject fonts: QtObject {
-        readonly property string family: "Google Sans Flex, sans-serif"
-        readonly property string familyMono: "JetBrainsMono Nerd Font, monospace"
+        readonly property string family: "Google Sans Flex"
+        readonly property string familyClock: "Rubik"
+        readonly property string familyMono: "JetBrainsMono Nerd Font"
         readonly property string familyIcon: "Material Symbols Rounded"
 
+        readonly property int small: 11
+        readonly property int smaller: 12
+        readonly property int normal: 13
+        readonly property int larger: 15
+        readonly property int large: 18
+        readonly property int extraLarge: 28
         readonly property int clock: 54
-        readonly property int headlineLarge: 42
-        readonly property int headlineMedium: 37
-        readonly property int headlineSmall: 32
-        readonly property int titleLarge: 29
-        readonly property int titleMedium: 21
-        readonly property int titleSmall: 18
-        readonly property int bodyLarge: 21
-        readonly property int bodyMedium: 16
-        readonly property int bodySmall: 14
-        readonly property int labelLarge: 18
-        readonly property int labelMedium: 16
-        readonly property int labelSmall: 14
-        readonly property int caption: 11
     }
 
     readonly property QtObject anim: QtObject {
@@ -221,6 +222,7 @@ QtObject {
             root.m3onPrimary = pick("onPrimary", root.m3onPrimary);
             root.m3primaryContainer = pick("primaryContainer", root.m3primaryContainer);
             root.m3onPrimaryContainer = pick("onPrimaryContainer", root.m3onPrimaryContainer);
+            root.m3primaryFixed = pick("primaryFixed", root.m3primaryFixed);
 
             root.m3secondary = pick("secondary", root.m3secondary);
             root.m3onSecondary = pick("onSecondary", root.m3onSecondary);

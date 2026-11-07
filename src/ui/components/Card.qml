@@ -13,7 +13,7 @@ Rectangle {
 
     color: Theme.alpha(Theme.surfaceContainer, baseOpacity)
     radius: Theme.rounding.xl
-    border.color: Theme.alpha(Theme.outlineVariant, isHovered ? 0.55 : 0.30)
+    border.color: Theme.alpha(Theme.outlineVariant, isHovered ? 0.35 : 0.12)
     border.width: 1
 
     Behavior on color {

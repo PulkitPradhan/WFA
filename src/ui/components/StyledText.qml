@@ -6,9 +6,9 @@ import "../../theme"
 Text {
     id: root
 
-    color: Theme.onSurface
+    color: Theme.text
     font.family: Theme.fonts.family
-    font.pixelSize: Theme.fonts.body
+    font.pixelSize: Theme.fonts.normal
     renderType: Text.NativeRendering
 
     Behavior on color {
