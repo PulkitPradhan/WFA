@@ -36,6 +36,13 @@ PanelWindow {
         Quickshell.execDetached(["hyprctl", "--batch", "eval hl.layer_rule({ match = { namespace = '^caelestia-desktop-widgets$' }, blur = true, ignore_alpha = 0.15 })"]);
     }
 
+    Connections {
+        target: Theme
+        function onSchemeNameChanged(): void {
+            Quickshell.execDetached(["hyprctl", "--batch", "eval hl.layer_rule({ match = { namespace = '^caelestia-desktop-widgets$' }, blur = true, ignore_alpha = 0.15 })"]);
+        }
+    }
+
     // --- Precision Input Masking (Click-Through) ---
     // Only the 4 individual compartment cards capture pointer events.
     // All transparent desktop areas between and around them pass mouse events straight through to the desktop.

@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# Start, stop or toggle the WFA Desktop Widgets.
+# Usage: wfa-toggle [on|off|toggle|restart|status|logs|start]
+#   toggle   stop if running, start if not (default)
+#   on/off   force state; choice persists across logins
+#   start    start at login unless disabled with 'off'
+#   status   display current running state and persistence flag
+#   logs     print recent output logs
+
+set -euo pipefail
+
+REAL_SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$REAL_SCRIPT")"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+CONFIG_PATH="$PROJECT_ROOT/shell.qml"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wfa"
+DISABLED_FLAG="$STATE_DIR/disabled"
+LOG_FILE="$STATE_DIR/wfa.log"
+PID_FILE="$STATE_DIR/wfa.pid"
+
+mkdir -p "$STATE_DIR"
+
+running_pid() {
+    pgrep -f "quickshell.*$CONFIG_PATH" | head -n1 || true
+}
+
+notify() {
+    if command -v omarchy-notification-send >/dev/null 2>&1; then
+        omarchy-notification-send -u low "$1" >/dev/null 2>&1 &
+    elif command -v notify-send >/dev/null 2>&1; then
+        notify-send -u low "WFA Widgets" "$1" >/dev/null 2>&1 &
+    fi
+}
+
+start() {
+    local pid
+    pid="$(running_pid)"
+    if [[ -n "$pid" ]]; then
+        echo "WFA Desktop Widgets already running (PID: $pid)"
+        return 0
+    fi
+
+    [[ -f "$CONFIG_PATH" ]] || {
+        echo "Error: Configuration not found at $CONFIG_PATH" >&2
+        return 1
+    }
+
+    echo "Starting WFA Desktop Widgets..."
+
+    # Pre-register Hyprland layer blur rules before surface binds
+    hyprctl --batch "eval hl.layer_rule({ match = { namespace = '^caelestia-desktop-widgets$' }, blur = true, ignore_alpha = 0.15 })" >/dev/null 2>&1 || true
+
+    QS_ICON_THEME=Adwaita \
+    setsid quickshell --path "$CONFIG_PATH" > "$LOG_FILE" 2>&1 < /dev/null &
+    local new_pid=$!
+    echo "$new_pid" > "$PID_FILE"
+    sleep 0.6
+
+    if kill -0 "$new_pid" 2>/dev/null; then
+        echo "WFA Desktop Widgets started successfully (PID: $new_pid)"
+        # Confirm layer rule application
+        hyprctl --batch "eval hl.layer_rule({ match = { namespace = '^caelestia-desktop-widgets$' }, blur = true, ignore_alpha = 0.15 })" >/dev/null 2>&1 || true
+    else
+        echo "Failed to start WFA Desktop Widgets. Check log: $LOG_FILE" >&2
+        cat "$LOG_FILE" >&2
+        return 1
+    fi
+}
+
+stop() {
+    local pid
+    pid="$(running_pid)"
+    if [[ -z "$pid" ]] && [[ -f "$PID_FILE" ]]; then
+        local stored_pid
+        stored_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+        if [[ -n "$stored_pid" ]] && kill -0 "$stored_pid" 2>/dev/null; then
+            pid="$stored_pid"
+        fi
+    fi
+
+    if [[ -n "$pid" ]]; then
+        echo "Stopping WFA Desktop Widgets (PID: $pid)..."
+        kill "$pid" 2>/dev/null || true
+        for _ in {1..20}; do
+            if ! kill -0 "$pid" 2>/dev/null; then
+                break
+            fi
+            sleep 0.1
+        done
+        kill -9 "$pid" 2>/dev/null || true
+        echo "WFA Desktop Widgets stopped."
+    else
+        echo "WFA Desktop Widgets are not running."
+    fi
+    rm -f "$PID_FILE"
+}
+
+show_status() {
+    local pid
+    pid="$(running_pid)"
+    if [[ -n "$pid" ]]; then
+        echo "WFA Desktop Widgets: RUNNING (PID: $pid)"
+        if [[ -f "$DISABLED_FLAG" ]]; then
+            echo "Persistence: DISABLED (will not start automatically on login)"
+        else
+            echo "Persistence: ENABLED (starts automatically on login)"
+        fi
+    else
+        echo "WFA Desktop Widgets: STOPPED"
+        if [[ -f "$DISABLED_FLAG" ]]; then
+            echo "Persistence: DISABLED"
+        else
+            echo "Persistence: ENABLED"
+        fi
+    fi
+}
+
+case "${1:-toggle}" in
+    start)
+        [[ -f "$DISABLED_FLAG" ]] || start
+        ;;
+    on)
+        rm -f "$DISABLED_FLAG"
+        start
+        notify "WFA Widgets on"
+        ;;
+    off)
+        touch "$DISABLED_FLAG"
+        stop
+        notify "WFA Widgets off"
+        ;;
+    toggle)
+        if [[ -n "$(running_pid)" ]]; then
+            touch "$DISABLED_FLAG"
+            stop
+            notify "WFA Widgets off"
+        else
+            rm -f "$DISABLED_FLAG"
+            start
+            notify "WFA Widgets on"
+        fi
+        ;;
+    restart)
+        stop
+        start
+        notify "WFA Widgets restarted"
+        ;;
+    status)
+        show_status
+        ;;
+    logs)
+        if [[ -f "$LOG_FILE" ]]; then
+            tail -n 50 "$LOG_FILE"
+        else
+            echo "No logs found at $LOG_FILE"
+        fi
+        ;;
+    *)
+        echo "Usage: $(basename "$0") [on|off|toggle|restart|status|logs|start]" >&2
+        exit 1
+        ;;
+esac

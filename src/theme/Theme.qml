@@ -175,12 +175,22 @@ QtObject {
         readonly property int easingCurve: Easing.OutCubic
     }
 
+    function reloadHyprRules(): void {
+        Quickshell.execDetached(["hyprctl", "--batch", "eval hl.layer_rule({ match = { namespace = '^caelestia-desktop-widgets$' }, blur = true, ignore_alpha = 0.15 })"]);
+    }
+
     // --- Dynamic File Watcher for Caelestia Theme Scheme ---
     readonly property FileView _fileView: FileView {
         path: Quickshell.env("HOME") + "/.local/state/caelestia/scheme.json"
         watchChanges: true
-        onFileChanged: reload()
-        onLoaded: root._applyScheme(text())
+        onFileChanged: {
+            reload();
+            root.reloadHyprRules();
+        }
+        onLoaded: {
+            root._applyScheme(text());
+            root.reloadHyprRules();
+        }
     }
 
     function _applyScheme(jsonText: string): void {
