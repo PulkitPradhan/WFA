@@ -1,0 +1,16 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+
+# Quickshell & OS artifacts
+*.log
+*.qslog
+.DS_Store
+
+# Node / temporary
+node_modules/
+package-lock.json
