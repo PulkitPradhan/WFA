@@ -1,6 +1,9 @@
 # WIDGETS FOR ALL
 (Caelestia Desktop Widgets)
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/26042450-52b2-41c1-98c2-ca5a3baf48c3" />
+
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/151def31-e444-47be-a480-bef7b8151f15" />
+
+
 
 <div align="center">
 
@@ -10,7 +13,11 @@
 [![Engine: Quickshell](https://img.shields.io/badge/Engine-Quickshell-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://quickshell.outfoxxed.me)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/26042450-52b2-41c1-98c2-ca5a3baf48c3" />
+
+
 *A modular, wallpaper-aware desktop widget system built with Qt 6 QML and Quickshell for Arch Linux, Hyprland, and Caelestia Shell.*
+
 
 </div>
 
