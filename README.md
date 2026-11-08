@@ -1,5 +1,6 @@
 # WIDGETS FOR ALL
 (Caelestia Desktop Widgets)
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/26042450-52b2-41c1-98c2-ca5a3baf48c3" />
 
 <div align="center">
 
