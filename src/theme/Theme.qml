@@ -157,8 +157,8 @@ QtObject {
     readonly property QtObject fonts: QtObject {
         readonly property string family: "Google Sans Flex"
         readonly property string familySans: "Google Sans Flex"
-        readonly property string familyClock: "Rubik"
-        readonly property string familyMono: "JetBrainsMono Nerd Font"
+        readonly property string familyClock: "Google Sans Flex"
+        readonly property string familyMono: "Google Sans Flex"
         readonly property string familyIcon: "Material Symbols Rounded"
 
         readonly property int small: 11

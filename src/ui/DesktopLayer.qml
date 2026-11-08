@@ -3,9 +3,11 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Widgets
 import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
 import "../theme"
 import "../services"
 import "components"
@@ -36,6 +38,7 @@ PanelWindow {
     // Hyprland compositor blur rule assertion
     Component.onCompleted: {
         Quickshell.execDetached(["hyprctl", "--batch", "eval hl.layer_rule({ match = { namespace = '^caelestia-desktop-widgets$' }, blur = true, ignore_alpha = 0.15 })"]);
+        layoutLoader.running = true;
     }
 
     Connections {
@@ -45,14 +48,18 @@ PanelWindow {
         }
     }
 
-    // --- Precision Input Masking (Click-Through) ---
-    // Pointer events are strictly restricted to the interactive widget cards.
-    // All transparent desktop areas pass through directly to Hyprland.
+    // --- Dynamic Input Masking (Click-Through) ---
+    // Tracks the independent floating coordinates of each widget
     mask: Region {
         Region { item: timeCard }
         Region { item: musicCard }
         Region { item: screenTimeCard }
         Region { item: appDrawerCard }
+    }
+
+    // PipeWire node tracker for real audio stream volume control
+    PwObjectTracker {
+        objects: Pipewire.nodes ? Pipewire.nodes.values : []
     }
 
     // Live clock ticker
@@ -64,8 +71,130 @@ PanelWindow {
     }
     property var currentTime: new Date()
 
-    // Weather expansion mode
+    // Weather expansion toggle
     property bool showWeather: false
+
+    // ==========================================
+    // PERSISTENT DESKTOP LAYOUT (Position & Size)
+    // ==========================================
+    readonly property string layoutPath: Quickshell.env("HOME") + "/.local/state/caelestia-widgets/layout.json"
+
+    function saveLayout(): void {
+        const data = {
+            clock: { x: Math.round(timeCard.x), y: Math.round(timeCard.y), w: Math.round(timeCard.width), h: Math.round(timeCard.height) },
+            music: { x: Math.round(musicCard.x), y: Math.round(musicCard.y), w: Math.round(musicCard.width), h: Math.round(musicCard.height) },
+            screentime: { x: Math.round(screenTimeCard.x), y: Math.round(screenTimeCard.y), w: Math.round(screenTimeCard.width), h: Math.round(screenTimeCard.height) },
+            apps: { x: Math.round(appDrawerCard.x), y: Math.round(appDrawerCard.y), w: Math.round(appDrawerCard.width), h: Math.round(appDrawerCard.height) }
+        };
+        const jsonStr = JSON.stringify(data);
+        Quickshell.execDetached(["python3", "-c", 
+            "import sys, os\n" +
+            "path = sys.argv[1]\n" +
+            "os.makedirs(os.path.dirname(path), exist_ok=True)\n" +
+            "with open(path + '.tmp', 'w') as f:\n" +
+            "    f.write(sys.argv[2])\n" +
+            "os.replace(path + '.tmp', path)\n",
+            win.layoutPath, jsonStr
+        ]);
+    }
+
+    Process {
+        id: layoutLoader
+        command: ["python3", "-c",
+            "import sys, os\n" +
+            "path = sys.argv[1]\n" +
+            "if os.path.exists(path):\n" +
+            "    with open(path) as f: print(f.read())\n" +
+            "else: print('')\n",
+            win.layoutPath
+        ]
+        running: false
+        stdout: StdioCollector {
+            id: layoutCollector
+            onStreamFinished: {
+                win.applySavedLayout(layoutCollector.text);
+            }
+        }
+    }
+
+    function applySavedLayout(text: string): void {
+        const trimmed = (text || "").trim();
+        if (trimmed.length > 0) {
+            try {
+                const data = JSON.parse(trimmed);
+                const clock = data.clock || data.time;
+                const music = data.music || data.media;
+                const screentime = data.screentime;
+                const apps = data.apps;
+
+                if (clock && clock.x !== undefined && clock.y !== undefined) {
+                    timeCard.x = Number(clock.x);
+                    timeCard.y = Number(clock.y);
+                    const w = clock.w !== undefined ? clock.w : clock.width;
+                    const h = clock.h !== undefined ? clock.h : clock.height;
+                    if (w !== undefined && !isNaN(w)) timeCard.width = Math.max(timeCard.minWidth, Math.min(timeCard.maxWidth, Number(w)));
+                    if (h !== undefined && !isNaN(h)) timeCard.height = Math.max(timeCard.minHeight, Math.min(timeCard.maxHeight, Number(h)));
+                }
+                if (music && music.x !== undefined && music.y !== undefined) {
+                    musicCard.x = Number(music.x);
+                    musicCard.y = Number(music.y);
+                    const w = music.w !== undefined ? music.w : music.width;
+                    const h = music.h !== undefined ? music.h : music.height;
+                    if (w !== undefined && !isNaN(w)) musicCard.width = Math.max(musicCard.minWidth, Math.min(musicCard.maxWidth, Number(w)));
+                    if (h !== undefined && !isNaN(h)) musicCard.height = Math.max(musicCard.minHeight, Math.min(musicCard.maxHeight, Number(h)));
+                }
+                if (screentime && screentime.x !== undefined && screentime.y !== undefined) {
+                    screenTimeCard.x = Number(screentime.x);
+                    screenTimeCard.y = Number(screentime.y);
+                    const w = screentime.w !== undefined ? screentime.w : screentime.width;
+                    const h = screentime.h !== undefined ? screentime.h : screentime.height;
+                    if (w !== undefined && !isNaN(w)) screenTimeCard.width = Math.max(screenTimeCard.minWidth, Math.min(screenTimeCard.maxWidth, Number(w)));
+                    if (h !== undefined && !isNaN(h)) screenTimeCard.height = Math.max(screenTimeCard.minHeight, Math.min(screenTimeCard.maxHeight, Number(h)));
+                }
+                if (apps && apps.x !== undefined && apps.y !== undefined) {
+                    appDrawerCard.x = Number(apps.x);
+                    appDrawerCard.y = Number(apps.y);
+                    const w = apps.w !== undefined ? apps.w : apps.width;
+                    const h = apps.h !== undefined ? apps.h : apps.height;
+                    if (w !== undefined && !isNaN(w)) appDrawerCard.width = Math.max(appDrawerCard.minWidth, Math.min(appDrawerCard.maxWidth, Number(w)));
+                    if (h !== undefined && !isNaN(h)) appDrawerCard.height = Math.max(appDrawerCard.minHeight, Math.min(appDrawerCard.maxHeight, Number(h)));
+                }
+                return;
+            } catch (e) {
+                console.warn("[Layout] Failed to parse layout JSON:", e);
+            }
+        }
+        initDefaultLayout();
+    }
+
+    function initDefaultLayout(): void {
+        const screenW = win.width > 0 ? win.width : 1920;
+        const screenH = win.height > 0 ? win.height : 1080;
+        const totalW = 440 + 20 + 480;
+        const totalH = 580;
+        const startX = Math.round((screenW - totalW) / 2);
+        const startY = Math.round((screenH - totalH) / 2);
+
+        timeCard.x = startX;
+        timeCard.y = startY;
+        timeCard.width = 440;
+        timeCard.height = 148;
+
+        musicCard.x = startX;
+        musicCard.y = startY + 148 + 14;
+        musicCard.width = 440;
+        musicCard.height = 156;
+
+        screenTimeCard.x = startX;
+        screenTimeCard.y = startY + 148 + 14 + 156 + 14;
+        screenTimeCard.width = 440;
+        screenTimeCard.height = 248;
+
+        appDrawerCard.x = startX + 440 + 20;
+        appDrawerCard.y = startY;
+        appDrawerCard.width = 480;
+        appDrawerCard.height = 580;
+    }
 
     // ==========================================
     // DYNAMIC MULTI-SOURCE MEDIA PLAYER ENGINE
@@ -92,11 +221,84 @@ PanelWindow {
         ? currentPlayer.trackArtUrl
         : ""
 
-    readonly property real playerVolume: (currentPlayer && currentPlayer.volume !== undefined)
-        ? currentPlayer.volume
-        : 1.0
+    function playerctlName(player): string {
+        if (!player) return "";
+        if (player.dbusName) {
+            return String(player.dbusName).replace("org.mpris.MediaPlayer2.", "");
+        }
+        if (player.identity) {
+            return String(player.identity).toLowerCase();
+        }
+        return "";
+    }
+
+    function getPlayerStream(player) {
+        if (!player || !Pipewire.nodes) return null;
+        const pName = (player.identity || "").toLowerCase();
+        const pEntry = (player.desktopEntry || "").toLowerCase();
+        const dbus = (player.dbusName || "").toLowerCase();
+
+        for (let i = 0; i < Pipewire.nodes.values.length; ++i) {
+            const n = Pipewire.nodes.values[i];
+            if (n && n.isStream && n.audio) {
+                const appName = (n.properties["application.name"] || "").toLowerCase();
+                const appBin = (n.properties["application.process.binary"] || "").toLowerCase();
+                const nodeName = (n.name || "").toLowerCase();
+
+                if (pName && (appName.includes(pName) || appBin.includes(pName) || nodeName.includes(pName))) return n;
+                if (pEntry && (appName.includes(pEntry) || appBin.includes(pEntry) || nodeName.includes(pEntry))) return n;
+                if (dbus.includes("chromium") && (appName.includes("chromium") || appBin.includes("chromium") || nodeName.includes("chromium"))) return n;
+                if (dbus.includes("brave") && (appName.includes("brave") || appBin.includes("brave") || nodeName.includes("brave"))) return n;
+                if (dbus.includes("spotify") && (appName.includes("spotify") || appBin.includes("spotify") || nodeName.includes("spotify"))) return n;
+                if (dbus.includes("firefox") && (appName.includes("firefox") || appBin.includes("firefox") || nodeName.includes("firefox"))) return n;
+            }
+        }
+        return null;
+    }
+
+    readonly property real playerVolume: {
+        const s = getPlayerStream(currentPlayer);
+        if (s && s.audio) {
+            return s.audio.muted ? 0.0 : s.audio.volume;
+        }
+        if (currentPlayer && currentPlayer.volume !== undefined) {
+            return currentPlayer.volume;
+        }
+        return 1.0;
+    }
 
     property real lastNonZeroVolume: 1.0
+
+    function setPlayerVolume(val: real): void {
+        const clamped = Math.max(0.0, Math.min(1.0, val));
+        const s = getPlayerStream(currentPlayer);
+        if (s && s.audio) {
+            s.audio.muted = (clamped <= 0.001);
+            s.audio.volume = clamped;
+        }
+        if (currentPlayer && currentPlayer.volumeSupported) {
+            currentPlayer.volume = clamped;
+        }
+        if (currentPlayer) {
+            const pid = playerctlName(currentPlayer);
+            if (pid) Quickshell.execDetached(["playerctl", "-p", pid, "volume", String(clamped)]);
+        }
+    }
+
+    function togglePlayerMute(): void {
+        if (!currentPlayer) return;
+        const s = getPlayerStream(currentPlayer);
+        if (s && s.audio) {
+            s.audio.muted = !s.audio.muted;
+            return;
+        }
+        if (playerVolume > 0.01) {
+            lastNonZeroVolume = playerVolume;
+            setPlayerVolume(0.0);
+        } else {
+            setPlayerVolume(lastNonZeroVolume || 1.0);
+        }
+    }
 
     readonly property int loopState: (currentPlayer && currentPlayer.loopState !== undefined)
         ? currentPlayer.loopState
@@ -159,8 +361,10 @@ PanelWindow {
         const clamped = Math.max(0.0, Math.min(win.trackLenSec, targetSeconds));
         if (win.currentPlayer.canSeek) {
             win.currentPlayer.position = clamped;
-        } else {
-            Quickshell.execDetached(["playerctl", "-p", win.currentPlayer.identity || "spotify", "position", String(clamped)]);
+        }
+        const pid = win.playerctlName(win.currentPlayer);
+        if (pid) {
+            Quickshell.execDetached(["playerctl", "-p", pid, "position", String(clamped)]);
         }
     }
 
@@ -173,28 +377,52 @@ PanelWindow {
             } else if (!win.isPlaying && win.currentPlayer.canPlay) {
                 win.currentPlayer.play();
             } else {
-                Quickshell.execDetached(["playerctl", "-p", win.currentPlayer.identity || "spotify", "play-pause"]);
+                const pid = win.playerctlName(win.currentPlayer);
+                if (pid) Quickshell.execDetached(["playerctl", "-p", pid, "play-pause"]);
+                else Quickshell.execDetached(["playerctl", "play-pause"]);
             }
         } else {
-            Quickshell.execDetached(["playerctl", "-p", "spotify", "play-pause"]);
+            Quickshell.execDetached(["playerctl", "play-pause"]);
         }
     }
 
     function nextTrack(): void {
         if (win.currentPlayer) {
-            if (win.currentPlayer.canGoNext) win.currentPlayer.next();
-            else Quickshell.execDetached(["playerctl", "-p", win.currentPlayer.identity || "spotify", "next"]);
+            if (win.currentPlayer.canGoNext) {
+                win.currentPlayer.next();
+            } else {
+                if (win.currentPlayer.canSeek) {
+                    win.currentPlayer.seek(10.0);
+                } else {
+                    const pid = win.playerctlName(win.currentPlayer);
+                    if (pid) Quickshell.execDetached(["playerctl", "-p", pid, "next"]);
+                    else Quickshell.execDetached(["playerctl", "next"]);
+                }
+            }
         } else {
-            Quickshell.execDetached(["playerctl", "-p", "spotify", "next"]);
+            Quickshell.execDetached(["playerctl", "next"]);
         }
     }
 
     function prevTrack(): void {
         if (win.currentPlayer) {
-            if (win.currentPlayer.canGoPrevious) win.currentPlayer.previous();
-            else Quickshell.execDetached(["playerctl", "-p", win.currentPlayer.identity || "spotify", "previous"]);
+            if (win.currentPlayer.canGoPrevious) {
+                win.currentPlayer.previous();
+            } else {
+                if (win.currentPlayer.canSeek) {
+                    if (win.currentPlayer.position > 10.0) {
+                        win.currentPlayer.seek(-10.0);
+                    } else {
+                        win.currentPlayer.position = 0.0;
+                    }
+                } else {
+                    const pid = win.playerctlName(win.currentPlayer);
+                    if (pid) Quickshell.execDetached(["playerctl", "-p", pid, "previous"]);
+                    else Quickshell.execDetached(["playerctl", "previous"]);
+                }
+            }
         } else {
-            Quickshell.execDetached(["playerctl", "-p", "spotify", "previous"]);
+            Quickshell.execDetached(["playerctl", "previous"]);
         }
     }
 
@@ -210,1240 +438,981 @@ PanelWindow {
     property int screenTimeView: 0
 
     // ==========================================
-    // CENTRAL WIDGET CLUSTER (1920x1080 Balanced)
+    // 1. CLOCK & CAELESTIA WEATHER WIDGET
     // ==========================================
-    Row {
-        id: cluster
-        anchors.centerIn: parent
-        spacing: 16
+    ResizableCard {
+        id: timeCard
+        widgetId: "clock"
+        x: 490
+        y: 262
+        width: 440
+        height: 148
+        minWidth: 320
+        maxWidth: 850
+        minHeight: win.showWeather ? 260 : 120
+        maxHeight: 550
+        hoverable: true
+        onGeometryChangedByUser: win.saveLayout()
 
-        // ==========================================
-        // LEFT COLUMN (Clock/Weather + Multi-Source Media + Screen Time)
-        // ==========================================
-        Column {
-            id: leftCol
-            width: 480
-            spacing: 14
+        // --- CLOCK MODE VIEW ---
+        Item {
+            anchors.fill: parent
+            anchors.margins: 20
+            visible: !win.showWeather
 
-            // ------------------------------------------
-            // 1. CLOCK & CAELESTIA WEATHER COMPARTMENT
-            // ------------------------------------------
-            Card {
-                id: timeCard
-                width: parent.width
-                height: win.showWeather ? 320 : 182
-                radius: Theme.rounding.xl
-                hoverable: true
+            // Weather pill button (top right)
+            Rectangle {
+                anchors.top: parent.top
+                anchors.right: parent.right
+                height: 28
+                radius: Theme.rounding.full
+                color: weatherPillArea.containsMouse ? Theme.alpha(Theme.primary, 0.20) : Theme.alpha(Theme.surfaceVariant, 0.40)
+                border.color: weatherPillArea.containsMouse ? Theme.alpha(Theme.primary, 0.35) : Theme.alpha(Theme.outlineVariant, 0.15)
+                border.width: 1
+                width: weatherPillRow.implicitWidth + 18
+                scale: weatherPillArea.pressed ? 0.95 : (weatherPillArea.containsMouse ? 1.03 : 1.0)
 
-                Behavior on height {
-                    NumberAnimation {
-                        duration: 250
-                        easing.type: Easing.OutCubic
+                Behavior on color { ColorAnimation { duration: 120 } }
+                Behavior on scale { NumberAnimation { duration: 120 } }
+
+                Row {
+                    id: weatherPillRow
+                    anchors.centerIn: parent
+                    spacing: 6
+
+                    Icon {
+                        name: Weather.icon
+                        size: 15
+                        color: Theme.primary
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    StyledText {
+                        text: Weather.temp + " • " + Weather.condition
+                        font.pixelSize: 11
+                        font.weight: Font.Medium
+                        color: weatherPillArea.containsMouse ? Theme.text : Theme.textSecondary
+                        anchors.verticalCenter: parent.verticalCenter
                     }
                 }
 
-                // --- CLOCK MODE VIEW ---
-                ColumnLayout {
+                MouseArea {
+                    id: weatherPillArea
                     anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 4
-                    visible: !win.showWeather
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: win.showWeather = true
+                }
+            }
 
-                    // Top Bar: View Tabs + Live Weather Badge
-                    RowLayout {
-                        Layout.fillWidth: true
+            // Main Clock and Date Row
+            RowLayout {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: 12
+                spacing: 20
 
-                        // View mode pill: Clock / Weather
+                // Clock numbers
+                Row {
+                    spacing: 2
+                    Layout.alignment: Qt.AlignBottom
+
+                    StyledText {
+                        text: Qt.formatTime(win.currentTime, "hh")
+                        font.pixelSize: 64
+                        font.weight: Font.Bold
+                        font.family: Theme.fonts.family
+                        font.features: ({ "tnum": 1 })
+                        color: Theme.primary
+                    }
+
+                    StyledText {
+                        text: ":"
+                        font.pixelSize: 58
+                        font.weight: Font.DemiBold
+                        font.family: Theme.fonts.family
+                        font.features: ({ "tnum": 1 })
+                        color: Theme.primaryFixed
+                        opacity: 0.85
+                    }
+
+                    StyledText {
+                        text: Qt.formatTime(win.currentTime, "mm")
+                        font.pixelSize: 64
+                        font.weight: Font.Bold
+                        font.family: Theme.fonts.family
+                        font.features: ({ "tnum": 1 })
+                        color: Theme.text
+                    }
+                }
+
+                // Date column
+                ColumnLayout {
+                    spacing: 3
+                    Layout.alignment: Qt.AlignVCenter
+
+                    StyledText {
+                        text: Qt.formatDateTime(win.currentTime, "dddd")
+                        font.pixelSize: 19
+                        font.weight: Font.DemiBold
+                        color: Theme.text
+                    }
+
+                    StyledText {
+                        text: Qt.formatDateTime(win.currentTime, "d MMMM yyyy")
+                        font.pixelSize: 12
+                        font.weight: Font.Normal
+                        color: Theme.textSecondary
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+        }
+
+        // --- WEATHER FORECAST VIEW ---
+        Flickable {
+            anchors.fill: parent
+            anchors.margins: 18
+            contentHeight: weatherContentCol.implicitHeight
+            contentWidth: width
+            clip: true
+            visible: win.showWeather
+
+            ColumnLayout {
+                id: weatherContentCol
+                width: parent.width
+                spacing: 12
+
+                // Header Bar: Back to Clock + Sunrise/Sunset
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    Rectangle {
+                        height: 26
+                        radius: Theme.rounding.full
+                        color: backTimeArea.containsMouse ? Theme.alpha(Theme.primary, 0.22) : Theme.alpha(Theme.surfaceVariant, 0.40)
+                        border.color: Theme.alpha(Theme.outlineVariant, 0.20)
+                        border.width: 1
+                        width: backRow.implicitWidth + 16
+
+                        Row {
+                            id: backRow
+                            anchors.centerIn: parent
+                            spacing: 4
+                            Icon {
+                                name: "arrow_back"
+                                size: 14
+                                color: Theme.primary
+                            }
+                            StyledText {
+                                text: "Clock"
+                                font.pixelSize: 11
+                                font.weight: Font.Medium
+                                color: Theme.text
+                            }
+                        }
+
+                        MouseArea {
+                            id: backTimeArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: win.showWeather = false
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Row {
+                        spacing: 12
                         Row {
                             spacing: 4
-
-                            Rectangle {
-                                height: 26
-                                radius: Theme.rounding.full
-                                color: Theme.alpha(Theme.primary, 0.20)
-                                border.color: Theme.alpha(Theme.primary, 0.35)
-                                border.width: 1
-                                width: clockTabRow.implicitWidth + 16
-
-                                Row {
-                                    id: clockTabRow
-                                    anchors.centerIn: parent
-                                    spacing: 4
-                                    Icon {
-                                        name: "schedule"
-                                        size: 13
-                                        color: Theme.primary
-                                    }
-                                    StyledText {
-                                        text: "Time"
-                                        font.pixelSize: 11
-                                        font.weight: Font.DemiBold
-                                        color: Theme.primary
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                height: 26
-                                radius: Theme.rounding.full
-                                color: weatherTabArea.containsMouse ? Theme.alpha(Theme.surfaceVariant, 0.60) : Theme.alpha(Theme.surfaceVariant, 0.25)
-                                border.color: Theme.alpha(Theme.outlineVariant, 0.15)
-                                border.width: 1
-                                width: weatherTabRow.implicitWidth + 16
-
-                                Row {
-                                    id: weatherTabRow
-                                    anchors.centerIn: parent
-                                    spacing: 4
-                                    Icon {
-                                        name: Weather.icon
-                                        size: 13
-                                        color: Theme.textSecondary
-                                    }
-                                    StyledText {
-                                        text: "Weather"
-                                        font.pixelSize: 11
-                                        font.weight: Font.Medium
-                                        color: Theme.textSecondary
-                                    }
-                                }
-
-                                MouseArea {
-                                    id: weatherTabArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: win.showWeather = true
-                                }
-                            }
+                            Icon { name: "wb_twilight"; size: 14; color: Theme.tertiary }
+                            StyledText { text: Weather.sunrise; font.pixelSize: 11; color: Theme.textSecondary }
                         }
-
-                        Item { Layout.fillWidth: true }
-
-                        // Live Weather Pill (Open-Meteo & IP-API data)
-                        Rectangle {
-                            height: 26
-                            radius: Theme.rounding.full
-                            color: weatherBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.18) : Theme.alpha(Theme.surfaceVariant, 0.35)
-                            border.color: weatherBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.40) : Theme.alpha(Theme.outlineVariant, 0.15)
-                            border.width: 1
-                            Layout.preferredWidth: weatherPillRow.implicitWidth + 18
-                            scale: weatherBadgeArea.pressed ? 0.94 : (weatherBadgeArea.containsMouse ? 1.03 : 1.0)
-
-                            Behavior on scale { NumberAnimation { duration: 120 } }
-                            Behavior on color { ColorAnimation { duration: 120 } }
-
-                            Row {
-                                id: weatherPillRow
-                                anchors.centerIn: parent
-                                spacing: 5
-
-                                Icon {
-                                    name: Weather.icon
-                                    size: 14
-                                    color: Theme.primary
-                                }
-
-                                StyledText {
-                                    text: Weather.city + " • " + Weather.temp + " " + Weather.condition
-                                    font.pixelSize: 11
-                                    font.weight: Font.Medium
-                                    color: weatherBadgeArea.containsMouse ? Theme.text : Theme.textSecondary
-                                }
-
-                                Icon {
-                                    name: "chevron_right"
-                                    size: 14
-                                    color: Theme.textSecondary
-                                }
-                            }
-
-                            MouseArea {
-                                id: weatherBadgeArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: win.showWeather = true
-                            }
+                        Row {
+                            spacing: 4
+                            Icon { name: "bedtime"; size: 14; color: Theme.tertiary }
+                            StyledText { text: Weather.sunset; font.pixelSize: 11; color: Theme.textSecondary }
                         }
                     }
-
-                    Item { Layout.fillHeight: true }
-
-                    // Prominent Caelestia Typography Clock
-                    RowLayout {
-                        Layout.alignment: Qt.AlignLeft
-                        spacing: 16
-
-                        // Primary Clock Display
-                        RowLayout {
-                            spacing: 2
-
-                            StyledText {
-                                text: Qt.formatTime(win.currentTime, "hh")
-                                font.family: Theme.fonts.familyClock
-                                font.pixelSize: 64
-                                font.weight: Font.Bold
-                                color: Theme.primary
-                            }
-
-                            StyledText {
-                                text: ":"
-                                font.family: Theme.fonts.familyClock
-                                font.pixelSize: 58
-                                font.weight: Font.DemiBold
-                                color: Theme.primaryFixed
-                                opacity: 0.9
-                                Layout.topMargin: -4
-                            }
-
-                            StyledText {
-                                text: Qt.formatTime(win.currentTime, "mm")
-                                font.family: Theme.fonts.familyClock
-                                font.pixelSize: 64
-                                font.weight: Font.Bold
-                                color: Theme.text
-                            }
-                        }
-
-                        // Vertical Accent Divider Pill
-                        Rectangle {
-                            Layout.preferredHeight: 56
-                            Layout.preferredWidth: 3.5
-                            radius: Theme.rounding.full
-                            color: Theme.primary
-                            opacity: 0.85
-                        }
-
-                        // Date Stack
-                        ColumnLayout {
-                            spacing: 1
-
-                            StyledText {
-                                text: Qt.formatDate(win.currentTime, "MMMM").toUpperCase()
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                font.letterSpacing: 2
-                                color: Theme.primaryFixed
-                            }
-
-                            StyledText {
-                                text: Qt.formatDate(win.currentTime, "dd")
-                                font.pixelSize: 22
-                                font.weight: Font.Bold
-                                font.letterSpacing: 1
-                                color: Theme.primary
-                            }
-
-                            StyledText {
-                                text: Qt.formatDate(win.currentTime, "dddd")
-                                font.pixelSize: 13
-                                font.letterSpacing: 1
-                                color: Theme.textSecondary
-                            }
-                        }
-                    }
-
-                    Item { Layout.fillHeight: true }
                 }
 
-                // --- CAELESTIA NATIVE WEATHER VIEW ---
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    spacing: 10
-                    visible: win.showWeather
+                // Main Weather Info: City + Temp + Condition
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 14
 
-                    // Top Bar: Back to Clock + Sunrise & Sunset
-                    RowLayout {
-                        Layout.fillWidth: true
-
-                        // Return to Time Tab Pill
-                        Rectangle {
-                            height: 26
-                            radius: Theme.rounding.full
-                            color: backToTimeArea.containsMouse ? Theme.alpha(Theme.primary, 0.22) : Theme.alpha(Theme.surfaceVariant, 0.40)
-                            border.color: Theme.alpha(Theme.outlineVariant, 0.20)
-                            border.width: 1
-                            width: backRow.implicitWidth + 16
-
-                            Row {
-                                id: backRow
-                                anchors.centerIn: parent
-                                spacing: 4
-                                Icon {
-                                    name: "arrow_back"
-                                    size: 13
-                                    color: Theme.primary
-                                }
-                                StyledText {
-                                    text: "Clock"
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                    color: Theme.text
-                                }
-                            }
-
-                            MouseArea {
-                                id: backToTimeArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: win.showWeather = false
-                            }
+                    ColumnLayout {
+                        spacing: 2
+                        StyledText {
+                            text: Weather.city
+                            font.pixelSize: 20
+                            font.weight: Font.Bold
+                            color: Theme.text
                         }
-
-                        Item { Layout.fillWidth: true }
-
-                        // Sunrise & Sunset Indicators
-                        Row {
-                            spacing: 12
-
-                            Row {
-                                spacing: 4
-                                Icon {
-                                    name: "wb_twilight"
-                                    size: 14
-                                    color: Theme.tertiary
-                                }
-                                StyledText {
-                                    text: Weather.sunrise
-                                    font.pixelSize: 11
-                                    font.weight: Font.Medium
-                                    color: Theme.textSecondary
-                                }
-                            }
-
-                            Row {
-                                spacing: 4
-                                Icon {
-                                    name: "bedtime"
-                                    size: 14
-                                    color: Theme.tertiary
-                                }
-                                StyledText {
-                                    text: Weather.sunset
-                                    font.pixelSize: 11
-                                    font.weight: Font.Medium
-                                    color: Theme.textSecondary
-                                }
-                            }
+                        StyledText {
+                            text: Qt.formatDate(win.currentTime, "dddd, MMMM d")
+                            font.pixelSize: 11
+                            color: Theme.textSecondary
                         }
                     }
 
-                    // Weather Hero Header Row: City + Big Temp & Icon + Condition
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 14
+                    Item { Layout.fillWidth: true }
 
+                    RowLayout {
+                        spacing: 10
+                        Icon {
+                            name: Weather.icon
+                            size: 38
+                            color: Theme.primaryFixed
+                        }
                         ColumnLayout {
-                            spacing: 2
-                            StyledText {
-                                text: Weather.city
-                                font.pixelSize: 22
-                                font.weight: Font.Bold
-                                color: Theme.text
+                            spacing: 0
+                            Row {
+                                spacing: 4
+                                StyledText {
+                                    text: Weather.temp
+                                    font.pixelSize: 28
+                                    font.weight: Font.Bold
+                                    color: Theme.primary
+                                }
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    height: 18
+                                    width: 28
+                                    radius: Theme.rounding.full
+                                    color: unitToggleArea.containsMouse ? Theme.alpha(Theme.primary, 0.20) : Theme.alpha(Theme.surfaceVariant, 0.40)
+                                    border.color: Theme.alpha(Theme.outlineVariant, 0.20)
+                                    border.width: 1
+
+                                    StyledText {
+                                        anchors.centerIn: parent
+                                        text: Weather.useFahrenheit ? "°C" : "°F"
+                                        font.pixelSize: 9
+                                        font.weight: Font.Bold
+                                        color: Theme.textSecondary
+                                    }
+
+                                    MouseArea {
+                                        id: unitToggleArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: Weather.toggleUnit()
+                                    }
+                                }
                             }
                             StyledText {
-                                text: Qt.formatDate(win.currentTime, "dddd, MMMM d")
-                                font.pixelSize: 12
+                                text: Weather.condition
+                                font.pixelSize: 11
                                 color: Theme.textSecondary
                             }
                         }
+                    }
+                }
 
-                        Item { Layout.fillWidth: true }
+                // 3 Details Cards
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
 
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 36
+                        radius: Theme.rounding.md
+                        color: Theme.alpha(Theme.surfaceVariant, 0.35)
                         RowLayout {
-                            spacing: 12
+                            anchors.centerIn: parent
+                            spacing: 5
+                            Icon { name: "water_drop"; size: 14; color: Theme.secondary }
+                            StyledText { text: Weather.humidity; font.pixelSize: 11; color: Theme.text }
+                        }
+                    }
 
-                            Icon {
-                                name: Weather.icon
-                                size: 44
-                                color: Theme.primaryFixed
-                            }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 36
+                        radius: Theme.rounding.md
+                        color: Theme.alpha(Theme.surfaceVariant, 0.35)
+                        RowLayout {
+                            anchors.centerIn: parent
+                            spacing: 5
+                            Icon { name: "thermostat"; size: 14; color: Theme.primary }
+                            StyledText { text: Weather.feelsLike; font.pixelSize: 11; color: Theme.text }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 36
+                        radius: Theme.rounding.md
+                        color: Theme.alpha(Theme.surfaceVariant, 0.35)
+                        RowLayout {
+                            anchors.centerIn: parent
+                            spacing: 5
+                            Icon { name: "air"; size: 14; color: Theme.tertiary }
+                            StyledText { text: Weather.windSpeed; font.pixelSize: 11; color: Theme.text }
+                        }
+                    }
+                }
+
+                // 7-Day Forecast Row
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 5
+
+                    Repeater {
+                        model: Weather.forecastDays
+
+                        Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 74
+                            radius: Theme.rounding.md
+                            color: Theme.alpha(Theme.surfaceVariant, 0.30)
 
                             ColumnLayout {
-                                spacing: 0
-
-                                Row {
-                                    spacing: 4
-                                    StyledText {
-                                        text: Weather.temp
-                                        font.pixelSize: 32
-                                        font.weight: Font.Bold
-                                        color: Theme.primary
-                                    }
-
-                                    // Unit Toggle Pill (°F / °C)
-                                    Rectangle {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        height: 18
-                                        width: 28
-                                        radius: Theme.rounding.full
-                                        color: unitArea.containsMouse ? Theme.alpha(Theme.primary, 0.20) : Theme.alpha(Theme.surfaceVariant, 0.40)
-                                        border.color: Theme.alpha(Theme.outlineVariant, 0.20)
-                                        border.width: 1
-
-                                        StyledText {
-                                            anchors.centerIn: parent
-                                            text: Weather.useFahrenheit ? "°C" : "°F"
-                                            font.pixelSize: 9
-                                            font.weight: Font.Bold
-                                            color: Theme.textSecondary
-                                        }
-
-                                        MouseArea {
-                                            id: unitArea
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: Weather.toggleUnit()
-                                        }
-                                    }
-                                }
+                                anchors.centerIn: parent
+                                spacing: 2
 
                                 StyledText {
-                                    text: Weather.condition
-                                    font.pixelSize: 12
+                                    text: modelData.day
+                                    font.pixelSize: 10
                                     font.weight: Font.Medium
                                     color: Theme.textSecondary
+                                    Layout.alignment: Qt.AlignHCenter
                                 }
-                            }
-                        }
-                    }
 
-                    // 3 Weather Stats Cards: Humidity | Feels Like | Wind
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        // Humidity Card
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 38
-                            radius: Theme.rounding.md
-                            color: Theme.alpha(Theme.surfaceVariant, 0.40)
-                            border.color: Theme.alpha(Theme.outlineVariant, 0.15)
-                            border.width: 1
-
-                            RowLayout {
-                                anchors.centerIn: parent
-                                spacing: 6
                                 Icon {
-                                    name: "water_drop"
-                                    size: 15
-                                    color: Theme.secondary
-                                }
-                                StyledText {
-                                    text: "Humidity " + Weather.humidity + "%"
-                                    font.pixelSize: 11
-                                    font.weight: Font.Medium
-                                    color: Theme.text
-                                }
-                            }
-                        }
-
-                        // Feels Like Card
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 38
-                            radius: Theme.rounding.md
-                            color: Theme.alpha(Theme.surfaceVariant, 0.40)
-                            border.color: Theme.alpha(Theme.outlineVariant, 0.15)
-                            border.width: 1
-
-                            RowLayout {
-                                anchors.centerIn: parent
-                                spacing: 6
-                                Icon {
-                                    name: "thermostat"
-                                    size: 15
+                                    name: modelData.icon
+                                    size: 18
                                     color: Theme.primary
+                                    Layout.alignment: Qt.AlignHCenter
                                 }
+
                                 StyledText {
-                                    text: "Feels " + Weather.feelsLike
-                                    font.pixelSize: 11
-                                    font.weight: Font.Medium
+                                    text: modelData.maxTemp + "°"
+                                    font.pixelSize: 10
+                                    font.weight: Font.Bold
                                     color: Theme.text
-                                }
-                            }
-                        }
-
-                        // Wind Card
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 38
-                            radius: Theme.rounding.md
-                            color: Theme.alpha(Theme.surfaceVariant, 0.40)
-                            border.color: Theme.alpha(Theme.outlineVariant, 0.15)
-                            border.width: 1
-
-                            RowLayout {
-                                anchors.centerIn: parent
-                                spacing: 6
-                                Icon {
-                                    name: "air"
-                                    size: 15
-                                    color: Theme.tertiary
-                                }
-                                StyledText {
-                                    text: Weather.windSpeed
-                                    font.pixelSize: 11
-                                    font.weight: Font.Medium
-                                    color: Theme.text
-                                }
-                            }
-                        }
-                    }
-
-                    // 7-Day Forecast Section Header
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        StyledText {
-                            text: "7-DAY FORECAST"
-                            font.pixelSize: 10
-                            font.weight: Font.Bold
-                            font.letterSpacing: 1.2
-                            color: Theme.textSecondary
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 1
-                            color: Theme.alpha(Theme.outlineVariant, 0.15)
-                        }
-                    }
-
-                    // 7-Day Forecast Row
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        Repeater {
-                            model: Weather.forecast
-
-                            Rectangle {
-                                required property var modelData
-                                required property int index
-
-                                Layout.fillWidth: true
-                                height: 74
-                                radius: Theme.rounding.md
-                                color: Theme.alpha(Theme.surfaceVariant, 0.35)
-                                border.color: Theme.alpha(Theme.outlineVariant, 0.15)
-                                border.width: 1
-
-                                ColumnLayout {
-                                    anchors.centerIn: parent
-                                    spacing: 3
-
-                                    StyledText {
-                                        Layout.alignment: Qt.AlignHCenter
-                                        text: modelData.day
-                                        font.pixelSize: 10
-                                        font.weight: Font.Bold
-                                        color: index === 0 ? Theme.primary : Theme.text
-                                    }
-
-                                    Icon {
-                                        Layout.alignment: Qt.AlignHCenter
-                                        name: modelData.icon
-                                        size: 16
-                                        color: Theme.primaryFixed
-                                    }
-
-                                    StyledText {
-                                        Layout.alignment: Qt.AlignHCenter
-                                        text: modelData.tempRange || (modelData.minTemp + "° / " + modelData.maxTemp + "°")
-                                        font.pixelSize: 9
-                                        font.weight: Font.DemiBold
-                                        color: Theme.textSecondary
-                                    }
+                                    Layout.alignment: Qt.AlignHCenter
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+    }
 
-            // ------------------------------------------
-            // 2. DYNAMIC MULTI-SOURCE MEDIA PLAYER
-            // ------------------------------------------
-            Card {
-                id: musicCard
-                width: parent.width
-                height: 148
-                radius: Theme.rounding.xl
-                hoverable: true
+    // ==========================================
+    // 2. DYNAMIC MULTI-SOURCE MEDIA PLAYER
+    // ==========================================
+    ResizableCard {
+        id: musicCard
+        widgetId: "music"
+        x: 490
+        y: 426
+        width: 440
+        height: 156
+        minWidth: 320
+        maxWidth: 850
+        minHeight: 120
+        maxHeight: 420
+        hoverable: true
+        onGeometryChangedByUser: win.saveLayout()
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 14
+            spacing: 8
+
+            // Top Bar: Player Source Badge + Navigation Dots + Volume Slider
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                // Source Identity Chip (clickable to switch)
+                Rectangle {
+                    height: 24
+                    radius: Theme.rounding.full
+                    color: sourceBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.18) : Theme.alpha(Theme.surfaceVariant, 0.45)
+                    border.color: sourceBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.35) : Theme.alpha(Theme.outlineVariant, 0.15)
+                    border.width: 1
+                    Layout.preferredWidth: sourceRow.implicitWidth + 14
+                    scale: sourceBadgeArea.pressed ? 0.95 : 1.0
+
+                    Row {
+                        id: sourceRow
+                        anchors.centerIn: parent
+                        spacing: 5
+
+                        IconImage {
+                            source: Quickshell.iconPath(win.getPlayerIcon(win.currentPlayer), "multimedia-player")
+                            implicitSize: 13
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        StyledText {
+                            text: win.getPlayerIdentity(win.currentPlayer)
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                            color: sourceBadgeArea.containsMouse ? Theme.text : Theme.textSecondary
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    MouseArea {
+                        id: sourceBadgeArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (win.playerCount > 1) {
+                                win.currentPlayerIndex = (win.clampedPlayerIndex + 1) % win.playerCount;
+                            }
+                        }
+                    }
+                }
+
+                // Dots for multiple active audio sources
+                Row {
+                    spacing: 4
+                    Layout.alignment: Qt.AlignVCenter
+                    visible: win.playerCount > 1
+
+                    Repeater {
+                        model: win.playerCount
+                        Rectangle {
+                            required property int index
+                            width: index === win.clampedPlayerIndex ? 14 : 5
+                            height: 5
+                            radius: Theme.rounding.full
+                            color: index === win.clampedPlayerIndex ? Theme.primary : Theme.alpha(Theme.textSecondary, 0.35)
+                            Behavior on width { NumberAnimation { duration: 150 } }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: win.currentPlayerIndex = index
+                            }
+                        }
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // Volume Slider
+                Row {
+                    spacing: 5
+                    Layout.alignment: Qt.AlignVCenter
+
+                    Icon {
+                        anchors.verticalCenter: parent.verticalCenter
+                        name: (win.playerVolume <= 0.01) ? "volume_off" : (win.playerVolume < 0.5 ? "volume_down" : "volume_up")
+                        size: 16
+                        color: volIconArea.containsMouse ? Theme.primary : Theme.textSecondary
+
+                        MouseArea {
+                            id: volIconArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: win.togglePlayerMute()
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 52
+                        height: 4
+                        radius: Theme.rounding.full
+                        color: Theme.alpha(Theme.secondaryContainer, 0.45)
+
+                        Rectangle {
+                            width: parent.width * Math.min(1.0, Math.max(0.0, win.playerVolume))
+                            height: parent.height
+                            radius: Theme.rounding.full
+                            color: Theme.primary
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            preventStealing: true
+                            cursorShape: Qt.PointingHandCursor
+                            onWheel: (wheel) => {
+                                const delta = wheel.angleDelta.y > 0 ? 0.05 : -0.05;
+                                win.setPlayerVolume(win.playerVolume + delta);
+                            }
+                            onClicked: (mouse) => win.setPlayerVolume(mouse.x / width)
+                            onPositionChanged: (mouse) => {
+                                if (pressed) win.setPlayerVolume(mouse.x / width);
+                            }
+                        }
+                    }
+
+                    StyledText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: Math.round(win.playerVolume * 100) + "%"
+                        font.pixelSize: 10
+                        font.features: ({ "tnum": 1 })
+                        color: Theme.textSecondary
+                    }
+                }
+            }
+
+            // Middle Row: Album Artwork + Details + Playback Buttons
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                // Cover Art
+                Rectangle {
+                    Layout.preferredWidth: 54
+                    Layout.preferredHeight: 54
+                    radius: 14
+                    color: Theme.alpha(Theme.surfaceContainerHigh, 0.60)
+                    border.color: Theme.alpha(Theme.outlineVariant, 0.20)
+                    border.width: 1
+                    clip: true
+
+                    Image {
+                        anchors.fill: parent
+                        source: win.trackArtUrl
+                        fillMode: Image.PreserveAspectCrop
+                        visible: win.trackArtUrl !== ""
+                        asynchronous: true
+                    }
+
+                    Icon {
+                        anchors.centerIn: parent
+                        name: "music_note"
+                        size: 24
+                        color: Theme.primaryFixed
+                        visible: win.trackArtUrl === ""
+                    }
+                }
+
+                // Track Title & Artist
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+
+                    StyledText {
+                        text: win.trackTitle
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+                        color: Theme.text
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+
+                    StyledText {
+                        text: win.trackArtist
+                        font.pixelSize: 12
+                        font.weight: Font.Normal
+                        color: Theme.textSecondary
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+
+                // Controls Row
+                RowLayout {
+                    spacing: 4
+                    Layout.alignment: Qt.AlignVCenter
+
+                    // Shuffle Button
+                    Rectangle {
+                        width: 28; height: 28
+                        radius: Theme.rounding.full
+                        color: win.isShuffle ? Theme.alpha(Theme.primary, 0.20) : "transparent"
+                        Icon {
+                            anchors.centerIn: parent
+                            name: "shuffle"
+                            size: 15
+                            color: win.isShuffle ? Theme.primary : Theme.textSecondary
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (win.currentPlayer) win.currentPlayer.shuffle = !win.currentPlayer.shuffle;
+                            }
+                        }
+                    }
+
+                    // Previous Track Button
+                    Rectangle {
+                        width: 32; height: 32
+                        radius: Theme.rounding.full
+                        color: prevArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.85) : Theme.alpha(Theme.surfaceContainerHigh, 0.40)
+                        scale: prevArea.pressed ? 0.92 : 1.0
+                        Icon { anchors.centerIn: parent; name: "skip_previous"; size: 17; color: Theme.text }
+                        MouseArea {
+                            id: prevArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: win.prevTrack()
+                        }
+                    }
+
+                    // Large Play/Pause FAB Button
+                    Rectangle {
+                        width: 40; height: 40
+                        radius: Theme.rounding.full
+                        color: Theme.primary
+                        scale: playFabArea.pressed ? 0.92 : (playFabArea.containsMouse ? 1.04 : 1.0)
+                        Behavior on scale { NumberAnimation { duration: 120 } }
+
+                        Icon {
+                            anchors.centerIn: parent
+                            name: win.isPlaying ? "pause" : "play_arrow"
+                            size: 22
+                            color: Theme.onPrimary
+                        }
+
+                        MouseArea {
+                            id: playFabArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: win.togglePlayPause()
+                        }
+                    }
+
+                    // Next Track Button
+                    Rectangle {
+                        width: 32; height: 32
+                        radius: Theme.rounding.full
+                        color: nextArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.85) : Theme.alpha(Theme.surfaceContainerHigh, 0.40)
+                        scale: nextArea.pressed ? 0.92 : 1.0
+                        Icon { anchors.centerIn: parent; name: "skip_next"; size: 17; color: Theme.text }
+                        MouseArea {
+                            id: nextArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: win.nextTrack()
+                        }
+                    }
+
+                    // Repeat Button
+                    Rectangle {
+                        width: 28; height: 28
+                        radius: Theme.rounding.full
+                        color: win.loopState > 0 ? Theme.alpha(Theme.primary, 0.20) : "transparent"
+                        Icon {
+                            anchors.centerIn: parent
+                            name: win.loopState === 1 ? "repeat_one" : "repeat"
+                            size: 15
+                            color: win.loopState > 0 ? Theme.primary : Theme.textSecondary
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (win.currentPlayer) win.currentPlayer.loopState = (win.currentPlayer.loopState + 1) % 3;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bottom Row: Seek Slider with Timestamps
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                StyledText {
+                    text: win.formatTime(win.isDraggingSeek ? win.dragSeekPos : win.trackPosSec)
+                    font.pixelSize: 10
+                    font.features: ({ "tnum": 1 })
+                    color: Theme.textSecondary
+                }
+
+                Rectangle {
+                    id: progTrack
+                    Layout.fillWidth: true
+                    height: 5
+                    radius: Theme.rounding.full
+                    color: Theme.alpha(Theme.secondaryContainer, 0.45)
+
+                    Rectangle {
+                        width: parent.width * win.displayProgress
+                        height: parent.height
+                        radius: Theme.rounding.full
+                        color: Theme.primary
+
+                        Behavior on width {
+                            enabled: !win.isDraggingSeek
+                            NumberAnimation { duration: 250; easing.type: Easing.OutCubic }
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        preventStealing: true
+
+                        onPressed: (mouse) => {
+                            if (win.trackLenSec > 0) {
+                                win.isDraggingSeek = true;
+                                const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                win.dragSeekPos = pct * win.trackLenSec;
+                            }
+                        }
+                        onPositionChanged: (mouse) => {
+                            if (pressed && win.trackLenSec > 0) {
+                                const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                win.dragSeekPos = pct * win.trackLenSec;
+                            }
+                        }
+                        onReleased: (mouse) => {
+                            if (win.isDraggingSeek) {
+                                win.isDraggingSeek = false;
+                                const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                win.seekTo(pct * win.trackLenSec);
+                            }
+                        }
+                        onClicked: (mouse) => {
+                            if (win.trackLenSec > 0) {
+                                const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                win.seekTo(pct * win.trackLenSec);
+                            }
+                        }
+                    }
+                }
+
+                StyledText {
+                    text: win.formatTime(win.trackLenSec)
+                    font.pixelSize: 10
+                    font.features: ({ "tnum": 1 })
+                    color: Theme.textSecondary
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // 3. SCREEN TIME WIDGET
+    // ==========================================
+    ResizableCard {
+        id: screenTimeCard
+        widgetId: "screentime"
+        x: 490
+        y: 598
+        width: 440
+        height: 248
+        minWidth: 320
+        maxWidth: 850
+        minHeight: 160
+        maxHeight: 550
+        hoverable: true
+        onGeometryChangedByUser: win.saveLayout()
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 16
+            spacing: 10
+
+            // Header Row: Title + Total Badge + Daily/Weekly Switch
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+
+                StyledText {
+                    text: "Screen Time"
+                    font.pixelSize: 15
+                    font.weight: Font.DemiBold
+                    color: Theme.text
+                }
+
+                Rectangle {
+                    height: 22
+                    radius: Theme.rounding.full
+                    color: Theme.alpha(Theme.primary, 0.15)
+                    Layout.preferredWidth: stTotalText.implicitWidth + 14
+
+                    StyledText {
+                        id: stTotalText
+                        anchors.centerIn: parent
+                        text: (win.screenTimeView === 0 ? ScreenTime.todayTotalFormatted : ScreenTime.weekTotalFormatted) || "0m"
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        color: Theme.primary
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                SegmentedSwitch {
+                    currentIndex: win.screenTimeView
+                    onSelectionChanged: function(idx) { win.screenTimeView = idx; }
+                }
+            }
+
+            // Application Usage Rows (ListModel with in-place updates)
+            Flickable {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: width
+                contentHeight: stContentCol.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
 
                 ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 14
+                    id: stContentCol
+                    width: parent.width
                     spacing: 8
 
-                    // Top Bar: Player Source Badge + Source Dots + Looper & Volume Controls
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
+                    StyledText {
+                        visible: (win.screenTimeView === 0 ? ScreenTime.todayModel.count : ScreenTime.weekModel.count) === 0
+                        text: "No active application usage recorded yet"
+                        font.pixelSize: 12
+                        color: Theme.textSecondary
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: 15
+                        Layout.bottomMargin: 15
+                    }
 
-                        // Source Identity Badge
-                        Rectangle {
-                            height: 24
-                            radius: Theme.rounding.full
-                            color: sourceBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.18) : Theme.alpha(Theme.surfaceVariant, 0.50)
-                            border.color: sourceBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.35) : Theme.alpha(Theme.outlineVariant, 0.15)
-                            border.width: 1
-                            Layout.preferredWidth: sourceRow.implicitWidth + 14
-                            scale: sourceBadgeArea.pressed ? 0.94 : (sourceBadgeArea.containsMouse ? 1.04 : 1.0)
+                    Repeater {
+                        model: win.screenTimeView === 0 ? ScreenTime.todayModel : ScreenTime.weekModel
 
-                            Behavior on scale { NumberAnimation { duration: 120 } }
-                            Behavior on color { ColorAnimation { duration: 120 } }
+                        ColumnLayout {
+                            required property var model
+                            Layout.fillWidth: true
+                            spacing: 3
 
-                            Row {
-                                id: sourceRow
-                                anchors.centerIn: parent
-                                spacing: 5
+                            RowLayout {
+                                Layout.fillWidth: true
 
                                 IconImage {
-                                    source: Quickshell.iconPath(win.getPlayerIcon(win.currentPlayer), "multimedia-player")
-                                    implicitSize: 13
-                                    anchors.verticalCenter: parent.verticalCenter
+                                    source: model.icon ? (model.icon.startsWith("/") ? ("file://" + model.icon) : Quickshell.iconPath(model.icon, model.fallback)) : ""
+                                    implicitSize: 16
                                 }
 
                                 StyledText {
-                                    text: win.getPlayerIdentity(win.currentPlayer)
+                                    text: model.name || ""
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                    color: Theme.text
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                StyledText {
+                                    text: model.time ? (model.time + " (" + Math.round((model.pct || 0) * 100) + "%)") : ""
                                     font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                    color: sourceBadgeArea.containsMouse ? Theme.text : Theme.textSecondary
-                                    anchors.verticalCenter: parent.verticalCenter
+                                    font.weight: Font.Medium
+                                    color: Theme.textSecondary
                                 }
                             }
 
-                            MouseArea {
-                                id: sourceBadgeArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (win.playerCount > 1) {
-                                        win.currentPlayerIndex = (win.clampedPlayerIndex + 1) % win.playerCount;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Navigation Dots for Active Audio Sources
-                        Row {
-                            spacing: 5
-                            Layout.alignment: Qt.AlignVCenter
-                            visible: win.playerCount > 1
-
-                            Repeater {
-                                model: win.playerCount
-
-                                Rectangle {
-                                    required property int index
-
-                                    width: index === win.clampedPlayerIndex ? 16 : 6
-                                    height: 6
-                                    radius: Theme.rounding.full
-                                    color: index === win.clampedPlayerIndex
-                                        ? Theme.primary
-                                        : (dotArea.containsMouse ? Theme.text : Theme.alpha(Theme.textSecondary, 0.35))
-
-                                    Behavior on width { NumberAnimation { duration: 150 } }
-                                    Behavior on color { ColorAnimation { duration: 120 } }
-
-                                    MouseArea {
-                                        id: dotArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: win.currentPlayerIndex = index
-                                    }
-                                }
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        // Looper: Shuffle Toggle
-                        Rectangle {
-                            width: 28
-                            height: 28
-                            radius: Theme.rounding.full
-                            color: win.isShuffle
-                                ? Theme.alpha(Theme.primary, 0.22)
-                                : (shuffArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.70) : "transparent")
-                            border.color: win.isShuffle ? Theme.alpha(Theme.primary, 0.40) : "transparent"
-                            border.width: 1
-                            scale: shuffArea.pressed ? 0.90 : (shuffArea.containsMouse ? 1.06 : 1.0)
-
-                            Behavior on scale { NumberAnimation { duration: 120 } }
-                            Behavior on color { ColorAnimation { duration: 120 } }
-
-                            Icon {
-                                anchors.centerIn: parent
-                                name: "shuffle"
-                                size: 15
-                                color: win.isShuffle ? Theme.primary : Theme.textSecondary
-                            }
-
-                            MouseArea {
-                                id: shuffArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (win.currentPlayer) {
-                                        win.currentPlayer.shuffle = !win.currentPlayer.shuffle;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Looper: Repeat Mode (None / Track / Playlist)
-                        Rectangle {
-                            width: 28
-                            height: 28
-                            radius: Theme.rounding.full
-                            color: win.loopState > 0
-                                ? Theme.alpha(Theme.primary, 0.22)
-                                : (repArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.70) : "transparent")
-                            border.color: win.loopState > 0 ? Theme.alpha(Theme.primary, 0.40) : "transparent"
-                            border.width: 1
-                            scale: repArea.pressed ? 0.90 : (repArea.containsMouse ? 1.06 : 1.0)
-
-                            Behavior on scale { NumberAnimation { duration: 120 } }
-                            Behavior on color { ColorAnimation { duration: 120 } }
-
-                            Icon {
-                                anchors.centerIn: parent
-                                name: win.loopState === 1 ? "repeat_one" : "repeat"
-                                size: 15
-                                color: win.loopState > 0 ? Theme.primary : Theme.textSecondary
-                            }
-
-                            MouseArea {
-                                id: repArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (win.currentPlayer) {
-                                        win.currentPlayer.loopState = (win.currentPlayer.loopState + 1) % 3;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Volume Control for Active Source
-                        Row {
-                            spacing: 4
-                            Layout.alignment: Qt.AlignVCenter
-
-                            Icon {
-                                anchors.verticalCenter: parent.verticalCenter
-                                name: (win.playerVolume <= 0.01) ? "volume_off" : (win.playerVolume < 0.5 ? "volume_down" : "volume_up")
-                                size: 16
-                                color: volArea.containsMouse ? Theme.primary : Theme.textSecondary
-
-                                MouseArea {
-                                    id: volArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (!win.currentPlayer) return;
-                                        if (win.playerVolume > 0.01) {
-                                            win.lastNonZeroVolume = win.playerVolume;
-                                            win.currentPlayer.volume = 0.0;
-                                        } else {
-                                            win.currentPlayer.volume = win.lastNonZeroVolume || 1.0;
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Volume Slider Bar
                             Rectangle {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 48
+                                Layout.fillWidth: true
                                 height: 4
                                 radius: Theme.rounding.full
                                 color: Theme.alpha(Theme.secondaryContainer, 0.45)
 
                                 Rectangle {
-                                    width: parent.width * Math.min(1.0, Math.max(0.0, win.playerVolume))
+                                    width: parent.width * Math.max(0.0, Math.min(1.0, model.pct || 0))
                                     height: parent.height
                                     radius: Theme.rounding.full
-                                    color: Theme.primary
-                                }
+                                    color: model.color || Theme.secondary
 
-                                MouseArea {
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onWheel: (wheel) => {
-                                        if (win.currentPlayer) {
-                                            const delta = wheel.angleDelta.y > 0 ? 0.05 : -0.05;
-                                            win.currentPlayer.volume = Math.max(0.0, Math.min(1.0, win.playerVolume + delta));
-                                        }
-                                    }
-                                    onClicked: (mouse) => {
-                                        if (win.currentPlayer) {
-                                            win.currentPlayer.volume = Math.max(0.0, Math.min(1.0, mouse.x / width));
-                                        }
-                                    }
-                                    onPositionChanged: (mouse) => {
-                                        if (pressed && win.currentPlayer) {
-                                            win.currentPlayer.volume = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                    Behavior on width {
+                                        NumberAnimation {
+                                            duration: Theme.anim.normal
+                                            easing.type: Theme.anim.easingCurve
                                         }
                                     }
                                 }
                             }
-
-                            StyledText {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: Math.round(win.playerVolume * 100) + "%"
-                                font.pixelSize: 10
-                                font.family: Theme.fonts.familyMono
-                                color: Theme.textSecondary
-                            }
-                        }
-                    }
-
-                    // Middle Row: Album Artwork + Metadata + Playback Buttons
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        // Album Artwork Container
-                        Rectangle {
-                            Layout.preferredWidth: 48
-                            Layout.preferredHeight: 48
-                            radius: Theme.rounding.md
-                            color: Theme.alpha(Theme.surfaceVariant, 0.45)
-                            border.color: Theme.alpha(Theme.outlineVariant, 0.20)
-                            border.width: 1
-                            clip: true
-
-                            Image {
-                                anchors.fill: parent
-                                visible: win.trackArtUrl.length > 0
-                                source: win.trackArtUrl
-                                fillMode: Image.PreserveAspectCrop
-                                asynchronous: true
-                            }
-
-                            Icon {
-                                anchors.centerIn: parent
-                                visible: win.trackArtUrl.length === 0
-                                name: "music_note"
-                                size: 24
-                                color: Theme.primary
-                            }
-                        }
-
-                        // Track Title & Artist Metadata
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-
-                            StyledText {
-                                text: win.trackTitle
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
-                                color: Theme.text
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-
-                            StyledText {
-                                text: win.trackArtist
-                                font.pixelSize: 11
-                                color: Theme.textSecondary
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-                        }
-
-                        // Playback Controls [<-] [play/pause] [->]
-                        Row {
-                            spacing: 6
-                            Layout.alignment: Qt.AlignVCenter
-
-                            // Previous Track Button
-                            Rectangle {
-                                width: 32
-                                height: 32
-                                radius: Theme.rounding.full
-                                color: prevArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.90) : Theme.alpha(Theme.surfaceContainerHigh, 0.55)
-                                scale: prevArea.pressed ? 0.92 : (prevArea.containsMouse ? 1.06 : 1.0)
-
-                                Behavior on scale { NumberAnimation { duration: 120 } }
-                                Behavior on color { ColorAnimation { duration: 120 } }
-
-                                Icon {
-                                    anchors.centerIn: parent
-                                    name: "skip_previous"
-                                    size: 17
-                                    color: Theme.text
-                                }
-
-                                MouseArea {
-                                    id: prevArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: win.prevTrack()
-                                }
-                            }
-
-                            // Play/Pause Accent Pill Button (Caelestia Stadium Morph)
-                            Rectangle {
-                                width: 50
-                                height: 32
-                                radius: Theme.rounding.full
-                                color: Theme.primary
-                                scale: playArea.pressed ? 0.92 : (playArea.containsMouse ? 1.05 : 1.0)
-
-                                Behavior on scale { NumberAnimation { duration: 120 } }
-
-                                Icon {
-                                    anchors.centerIn: parent
-                                    name: win.isPlaying ? "pause" : "play_arrow"
-                                    size: 18
-                                    color: Theme.textOnPrimary
-                                }
-
-                                MouseArea {
-                                    id: playArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: win.togglePlayPause()
-                                }
-                            }
-
-                            // Next Track Button
-                            Rectangle {
-                                width: 32
-                                height: 32
-                                radius: Theme.rounding.full
-                                color: nextArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.90) : Theme.alpha(Theme.surfaceContainerHigh, 0.55)
-                                scale: nextArea.pressed ? 0.92 : (nextArea.containsMouse ? 1.06 : 1.0)
-
-                                Behavior on scale { NumberAnimation { duration: 120 } }
-                                Behavior on color { ColorAnimation { duration: 120 } }
-
-                                Icon {
-                                    anchors.centerIn: parent
-                                    name: "skip_next"
-                                    size: 17
-                                    color: Theme.text
-                                }
-
-                                MouseArea {
-                                    id: nextArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: win.nextTrack()
-                                }
-                            }
-                        }
-                    }
-
-                    // Progress Track with Technical Timers & Full Seek Support (Click & Drag)
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        StyledText {
-                            text: win.formatTime(win.isDraggingSeek ? win.dragSeekPos : win.trackPosSec)
-                            font.pixelSize: 10
-                            font.family: Theme.fonts.familyMono
-                            color: Theme.textSecondary
-                        }
-
-                        Rectangle {
-                            id: progTrack
-                            Layout.fillWidth: true
-                            height: 6
-                            radius: Theme.rounding.full
-                            color: Theme.alpha(Theme.secondaryContainer, 0.45)
-
-                            Rectangle {
-                                width: parent.width * win.displayProgress
-                                height: parent.height
-                                radius: Theme.rounding.full
-                                color: Theme.primary
-
-                                Behavior on width {
-                                    enabled: !win.isDraggingSeek
-                                    NumberAnimation {
-                                        duration: 250
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                preventStealing: true
-
-                                onPressed: (mouse) => {
-                                    if (win.trackLenSec > 0) {
-                                        win.isDraggingSeek = true;
-                                        const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
-                                        win.dragSeekPos = pct * win.trackLenSec;
-                                    }
-                                }
-                                onPositionChanged: (mouse) => {
-                                    if (pressed && win.trackLenSec > 0) {
-                                        const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
-                                        win.dragSeekPos = pct * win.trackLenSec;
-                                    }
-                                }
-                                onReleased: (mouse) => {
-                                    if (win.isDraggingSeek) {
-                                        win.isDraggingSeek = false;
-                                        const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
-                                        win.seekTo(pct * win.trackLenSec);
-                                    }
-                                }
-                                onClicked: (mouse) => {
-                                    if (win.trackLenSec > 0) {
-                                        const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
-                                        win.seekTo(pct * win.trackLenSec);
-                                    }
-                                }
-                            }
-                        }
-
-                        StyledText {
-                            text: win.formatTime(win.trackLenSec)
-                            font.pixelSize: 10
-                            font.family: Theme.fonts.familyMono
-                            color: Theme.textSecondary
                         }
                     }
                 }
             }
 
-            // ------------------------------------------
-            // 3. SCREEN TIME COMPARTMENT
-            // ------------------------------------------
-            Card {
-                id: screenTimeCard
-                width: parent.width
-                height: 262
-                radius: Theme.rounding.xl
-                hoverable: true
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    spacing: 10
-
-                    // Header Row with Title + Segmented Switch + Total Time Badge
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        Row {
-                            spacing: 6
-                            Icon {
-                                name: "schedule"
-                                size: 16
-                                color: Theme.primary
-                            }
-                            StyledText {
-                                text: "Screen Time"
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
-                                color: Theme.text
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        // Daily / Weekly View Switch
-                        SegmentedSwitch {
-                            currentIndex: win.screenTimeView
-                            onSelectionChanged: function(idx) { win.screenTimeView = idx; }
-                        }
-
-                        // Total Duration Badge
-                        Rectangle {
-                            height: 24
-                            radius: Theme.rounding.full
-                            color: Theme.alpha(Theme.surfaceVariant, 0.45)
-                            border.color: Theme.alpha(Theme.outlineVariant, 0.15)
-                            border.width: 1
-                            Layout.preferredWidth: stTotalText.implicitWidth + 16
-
-                            StyledText {
-                                id: stTotalText
-                                anchors.centerIn: parent
-                                text: (win.screenTimeView === 0 ? ScreenTime.todayTotalFormatted : ScreenTime.weekTotalFormatted) || "0m"
-                                font.pixelSize: 11
-                                font.family: Theme.fonts.familySans
-                                font.weight: Font.DemiBold
-                                color: Theme.primary
-                            }
-                        }
-                    }
-
-                    // Application Usage Rows (Real data from ScreenTime service)
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 9
-
-                        Repeater {
-                            model: win.screenTimeView === 0 ? ScreenTime.todayList : ScreenTime.weekList
-
-                            ColumnLayout {
-                                required property var modelData
-                                Layout.fillWidth: true
-                                spacing: 3
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-
-                                    IconImage {
-                                        source: modelData && modelData.icon ? Quickshell.iconPath(modelData.icon, modelData.fallback) : ""
-                                        implicitSize: 16
-                                    }
-
-                                    StyledText {
-                                        text: modelData && modelData.name ? modelData.name : ""
-                                        font.pixelSize: 12
-                                        font.weight: Font.Medium
-                                        color: Theme.text
-                                    }
-
-                                    Item { Layout.fillWidth: true }
-
-                                    StyledText {
-                                        text: modelData && modelData.time ? (modelData.time + " (" + Math.round((modelData.pct || 0) * 100) + "%)") : ""
-                                        font.pixelSize: 11
-                                        font.family: Theme.fonts.familySans
-                                        font.weight: Font.Medium
-                                        color: Theme.textSecondary
-                                    }
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    height: 4
-                                    radius: Theme.rounding.full
-                                    color: Theme.alpha(Theme.secondaryContainer, 0.45)
-
-                                    Rectangle {
-                                        width: parent.width * modelData.pct
-                                        height: parent.height
-                                        radius: Theme.rounding.full
-                                        color: modelData.color
-
-                                        Behavior on width {
-                                            NumberAnimation {
-                                                duration: Theme.anim.normal
-                                                easing.type: Theme.anim.easingCurve
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Item { Layout.fillHeight: true }
-                }
-            }
+            Item { Layout.fillHeight: true }
         }
+    }
 
-        // ==========================================
-        // RIGHT COLUMN: ICON-FIRST APPLICATION DRAWER
-        // ==========================================
-        Card {
-            id: appDrawerCard
-            width: 530
-            // Height spans left column exact height: 182 + 14 + 148 + 14 + 262 = 620px
-            height: 620
-            radius: Theme.rounding.xl
-            hoverable: true
+    // ==========================================
+    // 4. RESPONSIVE APPLICATION DRAWER WIDGET
+    // ==========================================
+    ResizableCard {
+        id: appDrawerCard
+        widgetId: "apps"
+        x: 950
+        y: 262
+        width: 480
+        height: 580
+        minWidth: 260
+        maxWidth: 1050
+        minHeight: 250
+        maxHeight: 900
+        hoverable: true
+        onGeometryChangedByUser: win.saveLayout()
 
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 20
-                spacing: 12
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 18
+            spacing: 12
 
-                // Header Bar: Clean & Native (Square dots icon removed per user request)
-                RowLayout {
-                    Layout.fillWidth: true
+            // Header Bar
+            RowLayout {
+                Layout.fillWidth: true
 
-                    StyledText {
-                        text: "Applications"
-                        font.pixelSize: 14
-                        font.weight: Font.DemiBold
-                        color: Theme.text
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    // Count Badge
-                    Rectangle {
-                        height: 22
-                        radius: Theme.rounding.full
-                        color: Theme.alpha(Theme.surfaceVariant, 0.35)
-                        border.color: Theme.alpha(Theme.outlineVariant, 0.15)
-                        border.width: 1
-                        Layout.preferredWidth: countText.implicitWidth + 14
-
-                        StyledText {
-                            id: countText
-                            anchors.centerIn: parent
-                            text: "12 Most Used"
-                            font.pixelSize: 10
-                            font.weight: Font.Medium
-                            color: Theme.textSecondary
-                        }
-                    }
+                StyledText {
+                    text: "Applications"
+                    font.pixelSize: 15
+                    font.weight: Font.DemiBold
+                    color: Theme.text
                 }
 
-                // Section 1 Label: MOST USED
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    Layout.topMargin: 2
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    height: 22
+                    radius: Theme.rounding.full
+                    color: Theme.alpha(Theme.surfaceVariant, 0.40)
+                    Layout.preferredWidth: appCountText.implicitWidth + 14
 
                     StyledText {
-                        text: "MOST USED"
-                        font.pixelSize: 10
-                        font.weight: Font.Bold
-                        font.letterSpacing: 1.5
+                        id: appCountText
+                        anchors.centerIn: parent
+                        text: "12 apps"
+                        font.pixelSize: 11
+                        font.weight: Font.Medium
                         color: Theme.textSecondary
                     }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: Theme.alpha(Theme.outlineVariant, 0.15)
-                    }
                 }
+            }
 
-                // 4x3 Icon-First Grid (Real User Applications with Verified Icons)
+            // Smooth Scrollable, Dynamically Responsive Grid
+            Flickable {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: width
+                contentHeight: appGrid.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
                 GridLayout {
-                    Layout.fillWidth: true
-                    columns: 4
-                    rowSpacing: 8
-                    columnSpacing: 8
+                    id: appGrid
+                    width: parent.width
+                    // Responsive column calculation based on drawer width
+                    columns: Math.max(2, Math.floor((width - 16) / 105))
+                    rowSpacing: 10
+                    columnSpacing: 10
 
                     Repeater {
                         model: [
@@ -1467,90 +1436,7 @@ PanelWindow {
                             icon: modelData.icon
                             fallback: modelData.fallback
                             execCmd: modelData.exec
-                            iconSize: 50
-                        }
-                    }
-                }
-
-                Item { Layout.fillHeight: true }
-
-                // Section 2 Label: CUSTOM SHORTCUTS
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    StyledText {
-                        text: "CUSTOM SHORTCUTS"
-                        font.pixelSize: 10
-                        font.weight: Font.Bold
-                        font.letterSpacing: 1.5
-                        color: Theme.textSecondary
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: Theme.alpha(Theme.outlineVariant, 0.15)
-                    }
-                }
-
-                // Custom Shortcuts Row (4 Distinct Action Tiles)
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    Repeater {
-                        model: [
-                            { label: "Terminal", icon: "terminal", color: Theme.primary, exec: "kitty" },
-                            { label: "Files", icon: "folder", color: Theme.secondary, exec: "thunar" },
-                            { label: "Screenshot", icon: "screenshot_monitor", color: Theme.tertiary, exec: "qs ipc -c caelestia call picker openClip || grim" },
-                            { label: "Settings", icon: "settings", color: Theme.outline, exec: "omarchy menu toggle || systemsettings" }
-                        ]
-
-                        Rectangle {
-                            required property var modelData
-
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 44
-                            radius: Theme.rounding.md
-                            color: shortcutArea.containsMouse ? Theme.alpha(Theme.surfaceVariant, 0.60) : Theme.alpha(Theme.surfaceContainerLow, 0.35)
-                            border.color: shortcutArea.containsMouse ? Theme.alpha(modelData.color, 0.45) : Theme.alpha(Theme.outlineVariant, 0.15)
-                            border.width: 1
-                            scale: shortcutArea.pressed ? 0.95 : (shortcutArea.containsMouse ? 1.03 : 1.0)
-
-                            Behavior on color { ColorAnimation { duration: Theme.anim.fast } }
-                            Behavior on border.color { ColorAnimation { duration: Theme.anim.fast } }
-                            Behavior on scale { NumberAnimation { duration: 120 } }
-
-                            MouseArea {
-                                id: shortcutArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (modelData.exec) {
-                                        Quickshell.execDetached(["sh", "-c", modelData.exec]);
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                anchors.centerIn: parent
-                                spacing: 6
-
-                                Icon {
-                                    name: modelData.icon
-                                    size: 16
-                                    color: modelData.color
-                                }
-
-                                StyledText {
-                                    text: modelData.label
-                                    font.pixelSize: 11
-                                    font.weight: Font.Medium
-                                    color: shortcutArea.containsMouse ? Theme.text : Theme.textSecondary
-                                }
-                            }
+                            iconSize: 46
                         }
                     }
                 }

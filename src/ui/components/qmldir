@@ -1,4 +1,5 @@
 Card 1.0 Card.qml
+ResizableCard 1.0 ResizableCard.qml
 StyledText 1.0 StyledText.qml
 Icon 1.0 Icon.qml
 AppIconTile 1.0 AppIconTile.qml

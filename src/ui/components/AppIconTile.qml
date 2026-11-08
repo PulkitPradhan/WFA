@@ -70,7 +70,7 @@ Rectangle {
 
             IconImage {
                 anchors.centerIn: parent
-                source: Quickshell.iconPath(root.icon, root.fallback)
+                source: root.icon ? (root.icon.startsWith("/") ? ("file://" + root.icon) : Quickshell.iconPath(root.icon, root.fallback)) : ""
                 implicitSize: root.iconSize
             }
         }

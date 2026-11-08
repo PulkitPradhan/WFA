@@ -20,16 +20,32 @@ Item {
     property int todayTotalSeconds: 0
     property var history: ({})
 
-    // Computed lists for UI
-    property var todayList: []
-    property var weekList: []
+    // Native ListModels for zero-flicker, smooth delegate updates
+    ListModel { id: todayLm }
+    ListModel { id: weekLm }
+    property alias todayModel: todayLm
+    property alias weekModel: weekLm
+
     property string todayTotalFormatted: "0m"
     property string weekTotalFormatted: "0m"
 
-    // Active focused app info
+    // Wayland toplevel focus tracking
     readonly property var activeWindow: ToplevelManager.activeToplevel
-    readonly property string rawAppId: activeWindow && activeWindow.appId ? String(activeWindow.appId) : ""
-    readonly property string activeWindowTitle: activeWindow && activeWindow.title ? String(activeWindow.title) : ""
+
+    function getActiveAppId(): string {
+        if (activeWindow && activeWindow.appId) {
+            return String(activeWindow.appId);
+        }
+        if (ToplevelManager.toplevels) {
+            for (let i = 0; i < ToplevelManager.toplevels.values.length; ++i) {
+                const t = ToplevelManager.toplevels.values[i];
+                if (t && t.activated && t.appId) {
+                    return String(t.appId);
+                }
+            }
+        }
+        return "";
+    }
 
     function getLocalDayKey(d): string {
         const date = d || new Date();
@@ -54,15 +70,18 @@ Item {
         const id = rawId.toLowerCase();
 
         // System / Shell surfaces to ignore
-        if (id.includes("quickshell") || id.includes("caelestia-desktop-widgets") || id.includes("lock") || id.includes("desktop")) {
+        if (id.includes("quickshell") || id.includes("caelestia-desktop-widgets") || id.includes("lock") || id.includes("desktop") || id.includes("screensaver")) {
             return null;
         }
 
-        if (id.includes("brave")) {
-            return { id: "brave", name: "Brave Browser", icon: "brave-desktop", fallback: "web-browser", color: Theme.primary };
+        if (id.includes("antigravity")) {
+            return { id: "antigravity", name: "Antigravity", icon: "/home/erebusstride/.local/bin/Antigravity/Google-Antigravity-Icon-White.png", fallback: "utilities-terminal", color: Theme.primary };
         }
         if (id.includes("chromium")) {
             return { id: "chromium", name: "Chromium", icon: "chromium", fallback: "web-browser", color: Theme.primaryFixed };
+        }
+        if (id.includes("brave")) {
+            return { id: "brave", name: "Brave Browser", icon: "brave-desktop", fallback: "web-browser", color: Theme.primary };
         }
         if (id.includes("code") || id.includes("vscode")) {
             return { id: "vscode", name: "Visual Studio Code", icon: "vscode", fallback: "text-editor", color: Theme.secondary };
@@ -85,9 +104,6 @@ Item {
         if (id.includes("thunar")) {
             return { id: "thunar", name: "Files", icon: "org.xfce.thunar", fallback: "system-file-manager", color: Theme.secondary };
         }
-        if (id.includes("antigravity")) {
-            return { id: "antigravity", name: "Antigravity", icon: "/home/erebusstride/.local/bin/Antigravity/Google-Antigravity-Icon-White.png", fallback: "utilities-terminal", color: Theme.primary };
-        }
         if (id.includes("aether")) {
             return { id: "aether", name: "Aether", icon: "aether", fallback: "application-x-executable", color: Theme.tertiary };
         }
@@ -100,18 +116,47 @@ Item {
         return { id: id, name: cleanName, icon: rawId, fallback: "application-x-executable", color: Theme.secondary };
     }
 
+    // Synchronize ListModel in-place: delegates are never destroyed, animations stay butter-smooth
+    function syncListModel(lm, newItems) {
+        while (lm.count > newItems.length) {
+            lm.remove(lm.count - 1);
+        }
+        for (let i = 0; i < newItems.length; i++) {
+            const item = newItems[i];
+            const colStr = String(item.color || Theme.secondary);
+            if (i < lm.count) {
+                const cur = lm.get(i);
+                if (cur.appId !== item.appId) lm.setProperty(i, "appId", item.appId);
+                if (cur.name !== item.name) lm.setProperty(i, "name", item.name);
+                if (cur.icon !== item.icon) lm.setProperty(i, "icon", item.icon);
+                if (cur.fallback !== item.fallback) lm.setProperty(i, "fallback", item.fallback);
+                if (cur.time !== item.time) lm.setProperty(i, "time", item.time);
+                if (Math.abs((cur.pct || 0) - item.pct) > 0.002) lm.setProperty(i, "pct", item.pct);
+                if (cur.color !== colStr) lm.setProperty(i, "color", colStr);
+            } else {
+                lm.append({
+                    appId: item.appId,
+                    name: item.name,
+                    icon: item.icon,
+                    fallback: item.fallback,
+                    time: item.time,
+                    pct: item.pct,
+                    color: colStr
+                });
+            }
+        }
+    }
+
     // Handles 12:00 AM (Midnight) local day rollover
     function rollMidnight(newKey: string): void {
         console.log("[ScreenTime] Midnight rollover detected! Previous day:", todayKey, "New day:", newKey);
 
-        // 1. Archive previous day into history
         if (!root.history) root.history = {};
         root.history[root.todayKey] = {
             total: root.todayTotalSeconds,
             apps: Object.assign({}, root.todayApps)
         };
 
-        // 2. Prune days older than 30 days
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - 30);
         const cutoffKey = getLocalDayKey(cutoff);
@@ -121,12 +166,10 @@ Item {
             }
         }
 
-        // 3. Reset today's bucket to 0 for the new day
         root.todayKey = newKey;
         root.todayApps = {};
         root.todayTotalSeconds = 0;
 
-        // 4. Update UI & save to disk
         recalculateModels();
         save();
     }
@@ -150,7 +193,6 @@ Item {
             }
         }
 
-        // Sort descending by usage
         todayEntries.sort((a, b) => b.seconds - a.seconds);
 
         const totalSecs = Math.max(root.todayTotalSeconds, 1);
@@ -159,6 +201,7 @@ Item {
             const e = todayEntries[i];
             const pct = Math.min(1.0, Math.max(0.01, e.seconds / totalSecs));
             topToday.push({
+                appId: e.id,
                 name: e.name,
                 icon: e.icon,
                 fallback: e.fallback,
@@ -167,19 +210,16 @@ Item {
                 color: e.color
             });
         }
-        root.todayList = topToday;
+        syncListModel(todayLm, topToday);
         root.todayTotalFormatted = formatDuration(root.todayTotalSeconds);
 
         // --- 2. Compute Week's List (Past 7 Days from history + today) ---
         const weekApps = {};
         let weekTotal = root.todayTotalSeconds;
-
-        // Add today's apps
         for (const id in appMap) {
             weekApps[id] = (weekApps[id] || 0) + appMap[id];
         }
 
-        // Add previous 6 days from history
         const hist = root.history || {};
         for (let d = 1; d <= 6; d++) {
             const prev = new Date();
@@ -217,6 +257,7 @@ Item {
             const e = weekEntries[i];
             const pct = Math.min(1.0, Math.max(0.01, e.seconds / safeWeekTotal));
             topWeek.push({
+                appId: e.id,
                 name: e.name,
                 icon: e.icon,
                 fallback: e.fallback,
@@ -225,9 +266,11 @@ Item {
                 color: e.color
             });
         }
-        root.weekList = topWeek;
+        syncListModel(weekLm, topWeek);
         root.weekTotalFormatted = formatDuration(weekTotal);
     }
+
+    property int tickCounter: 0
 
     // 1-second active tracking ticker
     property var ticker: Timer {
@@ -244,19 +287,25 @@ Item {
             }
 
             // Check focused window
-            const app = root.resolveApp(root.rawAppId);
+            const activeId = root.getActiveAppId();
+            const app = root.resolveApp(activeId);
             if (app) {
                 if (!root.todayApps) root.todayApps = {};
                 root.todayApps[app.id] = (root.todayApps[app.id] || 0) + 1;
                 root.todayTotalSeconds += 1;
+            }
+
+            root.tickCounter += 1;
+            // Update smoothly every 2 seconds without recreating items
+            if (root.tickCounter % 2 === 0) {
                 root.recalculateModels();
             }
         }
     }
 
-    // Auto-save to disk every 30 seconds
+    // Auto-save to disk every 15 seconds
     property var saveTimer: Timer {
-        interval: 30000
+        interval: 15000
         repeat: true
         running: true
         onTriggered: root.save()
@@ -314,12 +363,10 @@ Item {
                 root.history = data.history || {};
 
                 if (data.todayKey === localKey) {
-                    // Same local day: resume accumulated seconds
                     root.todayKey = localKey;
                     root.todayTotalSeconds = data.todayTotal || 0;
                     root.todayApps = data.todayApps || {};
                 } else {
-                    // New local day after restart: archive previous day and start fresh
                     if (data.todayKey) {
                         root.history[data.todayKey] = {
                             total: data.todayTotal || 0,
@@ -332,48 +379,23 @@ Item {
                 }
             } catch (e) {
                 console.warn("[ScreenTime] Error parsing storage JSON:", e);
-                initDefaultData(localKey);
+                initEmptyData(localKey);
             }
         } else {
-            // First run: initialize with baseline session data for today
-            initDefaultData(localKey);
+            // First run: clean start with 0 data
+            initEmptyData(localKey);
         }
         root.recalculateModels();
     }
 
-    function initDefaultData(localKey: string): void {
+    function initEmptyData(localKey: string): void {
         root.todayKey = localKey;
-        // Realistic initial day data for today's active session
-        root.todayApps = {
-            "brave": 8040,   // 2h 14m
-            "vscode": 4680,  // 1h 18m
-            "kitty": 2280,   // 38m
-            "spotify": 1080  // 18m
-        };
-        root.todayTotalSeconds = 16080; // 4h 28m
-
-        // Baseline past week history (6 days)
-        const hist = {};
-        for (let d = 1; d <= 6; d++) {
-            const prev = new Date();
-            prev.setDate(prev.getDate() - d);
-            const k = root.getLocalDayKey(prev);
-            hist[k] = {
-                total: 14200,
-                apps: {
-                    "vscode": 6400,
-                    "brave": 4800,
-                    "kitty": 2000,
-                    "spotify": 1000
-                }
-            };
-        }
-        root.history = hist;
-        root.save();
+        root.todayApps = {};
+        root.todayTotalSeconds = 0;
+        root.history = {};
     }
 
     Component.onCompleted: {
-        initDefaultData(todayKey);
         load();
     }
 }
