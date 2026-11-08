@@ -33,14 +33,15 @@ QtObject {
 
     // 7-day forecast model
     property var forecast: [
-        { day: "Today", date: "Nov 8", icon: "rainy", minTemp: 68, maxTemp: 84, minTempC: 19.9, maxTempC: 28.7 },
-        { day: "Mon", date: "Nov 9", icon: "rainy", minTemp: 67, maxTemp: 82, minTempC: 19.4, maxTempC: 28.0 },
-        { day: "Tue", date: "Nov 10", icon: "cloud", minTemp: 65, maxTemp: 83, minTempC: 18.4, maxTempC: 28.5 },
-        { day: "Wed", date: "Nov 11", icon: "cloud", minTemp: 65, maxTemp: 84, minTempC: 18.5, maxTempC: 28.9 },
-        { day: "Thu", date: "Nov 12", icon: "cloud", minTemp: 64, maxTemp: 85, minTempC: 17.7, maxTempC: 29.2 },
-        { day: "Fri", date: "Nov 13", icon: "partly_cloudy_day", minTemp: 62, maxTemp: 85, minTempC: 16.6, maxTempC: 29.4 },
-        { day: "Sat", date: "Nov 14", icon: "cloud", minTemp: 64, maxTemp: 86, minTempC: 17.5, maxTempC: 29.9 }
+        { day: "Today", date: "Nov 8", icon: "rainy", minTemp: 68, maxTemp: 84, minTempC: 19.9, maxTempC: 28.7, formattedMax: "84°", formattedMin: "68°" },
+        { day: "Mon", date: "Nov 9", icon: "rainy", minTemp: 67, maxTemp: 82, minTempC: 19.4, maxTempC: 28.0, formattedMax: "82°", formattedMin: "67°" },
+        { day: "Tue", date: "Nov 10", icon: "cloud", minTemp: 65, maxTemp: 83, minTempC: 18.4, maxTempC: 28.5, formattedMax: "83°", formattedMin: "65°" },
+        { day: "Wed", date: "Nov 11", icon: "cloud", minTemp: 65, maxTemp: 84, minTempC: 18.5, maxTempC: 28.9, formattedMax: "84°", formattedMin: "65°" },
+        { day: "Thu", date: "Nov 12", icon: "cloud", minTemp: 64, maxTemp: 85, minTempC: 17.7, maxTempC: 29.2, formattedMax: "85°", formattedMin: "64°" },
+        { day: "Fri", date: "Nov 13", icon: "partly_cloudy_day", minTemp: 62, maxTemp: 85, minTempC: 16.6, maxTempC: 29.4, formattedMax: "85°", formattedMin: "62°" },
+        { day: "Sat", date: "Nov 14", icon: "cloud", minTemp: 64, maxTemp: 86, minTempC: 17.5, maxTempC: 29.9, formattedMax: "86°", formattedMin: "64°" }
     ]
+    readonly property alias forecastDays: root.forecast
 
     function toggleUnit(): void {
         useFahrenheit = !useFahrenheit;
@@ -68,6 +69,8 @@ QtObject {
                 maxTemp: item.maxTemp,
                 minTempC: item.minTempC,
                 maxTempC: item.maxTempC,
+                formattedMax: max,
+                formattedMin: min,
                 tempRange: min + " / " + max
             });
         }

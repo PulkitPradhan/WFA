@@ -62,6 +62,7 @@ Item {
         if (h > 0) {
             return h + "h " + (m > 0 ? (m + "m") : "");
         }
+        if (m === 0) return "<1m";
         return m + "m";
     }
 
@@ -131,6 +132,7 @@ Item {
                 if (cur.icon !== item.icon) lm.setProperty(i, "icon", item.icon);
                 if (cur.fallback !== item.fallback) lm.setProperty(i, "fallback", item.fallback);
                 if (cur.time !== item.time) lm.setProperty(i, "time", item.time);
+                if (cur.pctStr !== item.pctStr) lm.setProperty(i, "pctStr", item.pctStr);
                 if (Math.abs((cur.pct || 0) - item.pct) > 0.002) lm.setProperty(i, "pct", item.pct);
                 if (cur.color !== colStr) lm.setProperty(i, "color", colStr);
             } else {
@@ -140,6 +142,7 @@ Item {
                     icon: item.icon,
                     fallback: item.fallback,
                     time: item.time,
+                    pctStr: item.pctStr,
                     pct: item.pct,
                     color: colStr
                 });
@@ -178,9 +181,11 @@ Item {
         // --- 1. Compute Today's List ---
         const todayEntries = [];
         const appMap = root.todayApps || {};
+        let calculatedTodayTotal = 0;
         for (const appId in appMap) {
             const secs = appMap[appId];
             if (secs > 0) {
+                calculatedTodayTotal += secs;
                 const info = resolveApp(appId) || { id: appId, name: appId, icon: appId, fallback: "application-x-executable", color: Theme.secondary };
                 todayEntries.push({
                     id: appId,
@@ -193,13 +198,16 @@ Item {
             }
         }
 
+        root.todayTotalSeconds = calculatedTodayTotal;
         todayEntries.sort((a, b) => b.seconds - a.seconds);
 
         const totalSecs = Math.max(root.todayTotalSeconds, 1);
         const topToday = [];
-        for (let i = 0; i < Math.min(4, todayEntries.length); i++) {
+        const maxToday = Math.min(25, todayEntries.length);
+        for (let i = 0; i < maxToday; i++) {
             const e = todayEntries[i];
-            const pct = Math.min(1.0, Math.max(0.01, e.seconds / totalSecs));
+            const pct = Math.min(1.0, Math.max(0.001, e.seconds / totalSecs));
+            const pctDisplay = pct >= 0.01 ? (Math.round(pct * 100) + "%") : "<1%";
             topToday.push({
                 appId: e.id,
                 name: e.name,
@@ -207,6 +215,7 @@ Item {
                 fallback: e.fallback,
                 time: formatDuration(e.seconds),
                 pct: pct,
+                pctStr: pctDisplay,
                 color: e.color
             });
         }
@@ -253,9 +262,11 @@ Item {
 
         const safeWeekTotal = Math.max(weekTotal, 1);
         const topWeek = [];
-        for (let i = 0; i < Math.min(4, weekEntries.length); i++) {
+        const maxWeek = Math.min(25, weekEntries.length);
+        for (let i = 0; i < maxWeek; i++) {
             const e = weekEntries[i];
-            const pct = Math.min(1.0, Math.max(0.01, e.seconds / safeWeekTotal));
+            const pct = Math.min(1.0, Math.max(0.001, e.seconds / safeWeekTotal));
+            const pctDisplay = pct >= 0.01 ? (Math.round(pct * 100) + "%") : "<1%";
             topWeek.push({
                 appId: e.id,
                 name: e.name,
@@ -263,6 +274,7 @@ Item {
                 fallback: e.fallback,
                 time: formatDuration(e.seconds),
                 pct: pct,
+                pctStr: pctDisplay,
                 color: e.color
             });
         }

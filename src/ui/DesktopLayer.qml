@@ -73,6 +73,24 @@ PanelWindow {
 
     // Weather expansion toggle
     property bool showWeather: false
+    property real lastClockHeight: 148
+
+    function toggleWeather(): void {
+        console.log("[DesktopLayer] toggleWeather called! Current showWeather:", win.showWeather, "lastClockHeight:", win.lastClockHeight, "card height:", timeCard.height);
+        if (!win.showWeather) {
+            win.lastClockHeight = timeCard.height;
+            win.showWeather = true;
+            if (timeCard.height < 290) timeCard.height = 290;
+        } else {
+            win.showWeather = false;
+            if (win.lastClockHeight > 0 && win.lastClockHeight < 240) {
+                timeCard.height = win.lastClockHeight;
+            } else {
+                timeCard.height = 165;
+            }
+        }
+        win.saveLayout();
+    }
 
     // ==========================================
     // PERSISTENT DESKTOP LAYOUT (Position & Size)
@@ -133,7 +151,11 @@ PanelWindow {
                     const w = clock.w !== undefined ? clock.w : clock.width;
                     const h = clock.h !== undefined ? clock.h : clock.height;
                     if (w !== undefined && !isNaN(w)) timeCard.width = Math.max(timeCard.minWidth, Math.min(timeCard.maxWidth, Number(w)));
-                    if (h !== undefined && !isNaN(h)) timeCard.height = Math.max(timeCard.minHeight, Math.min(timeCard.maxHeight, Number(h)));
+                    if (h !== undefined && !isNaN(h)) {
+                        const parsedH = Math.max(timeCard.minHeight, Math.min(timeCard.maxHeight, Number(h)));
+                        timeCard.height = parsedH;
+                        if (!win.showWeather) win.lastClockHeight = parsedH;
+                    }
                 }
                 if (music && music.x !== undefined && music.y !== undefined) {
                     musicCard.x = Number(music.x);
@@ -444,27 +466,54 @@ PanelWindow {
         id: timeCard
         widgetId: "clock"
         x: 490
-        y: 262
+        y: 250
         width: 440
         height: 148
         minWidth: 320
         maxWidth: 850
-        minHeight: win.showWeather ? 260 : 120
+        minHeight: win.showWeather ? 240 : 110
         maxHeight: 550
         hoverable: true
         onGeometryChangedByUser: win.saveLayout()
 
+        // Dynamic Responsive Content Sizing
+        readonly property int clockFontSize: Math.round(Math.min(height * 0.44, width * 0.20))
+        readonly property int colonFontSize: Math.round(clockFontSize * 0.90)
+        readonly property int dayFontSize: Math.round(Math.max(14, clockFontSize * 0.30))
+        readonly property int dateFontSize: Math.round(Math.max(11, clockFontSize * 0.18))
+        readonly property int weatherPillHeight: Math.round(Math.min(42, Math.max(26, height * 0.18)))
+        readonly property int weatherIconSize: Math.round(Math.min(20, Math.max(13, height * 0.10)))
+        readonly property int weatherFontSize: Math.round(Math.min(15, Math.max(10, height * 0.075)))
+
+        // Dynamic Weather Content Sizing (Proportional to card size like clock)
+        readonly property real wScale: Math.max(0.9, Math.min(2.0, width / 440))
+        readonly property real hScale: Math.max(0.9, Math.min(2.0, height / 260))
+        readonly property real weatherScale: Math.max(0.9, Math.min(1.8, (wScale + hScale) / 2))
+        readonly property int weatherCityFontSize: Math.round(Math.min(36, Math.max(20, 24 * wScale)))
+        readonly property int weatherDateFontSize: Math.round(Math.min(16, Math.max(11, 12 * wScale)))
+        readonly property int weatherTempFontSize: Math.round(Math.min(68, Math.max(38, 46 * wScale)))
+        readonly property int weatherBigIconSize: Math.round(Math.min(76, Math.max(42, 52 * wScale)))
+        readonly property int weatherChipHeight: Math.round(Math.min(54, Math.max(34, height * 0.14)))
+        readonly property int weatherChipFontSize: Math.round(Math.min(16, Math.max(11, 12 * wScale)))
+        readonly property int weatherChipIconSize: Math.round(Math.min(20, Math.max(14, 15 * wScale)))
+        readonly property int weatherForecastCardHeight: Math.round(Math.min(110, Math.max(68, height * 0.27)))
+        readonly property int weatherForecastDayFont: Math.round(Math.min(14, Math.max(10, 11 * wScale)))
+        readonly property int weatherForecastIconSize: Math.round(Math.min(26, Math.max(16, 20 * wScale)))
+        readonly property int weatherForecastTempFont: Math.round(Math.min(15, Math.max(10, 11 * wScale)))
+        readonly property int weatherBackBtnHeight: Math.round(Math.min(38, Math.max(26, 28 * wScale)))
+        readonly property int weatherBackBtnFontSize: Math.round(Math.min(15, Math.max(11, 12 * wScale)))
+
         // --- CLOCK MODE VIEW ---
         Item {
             anchors.fill: parent
-            anchors.margins: 20
+            anchors.margins: Math.round(Math.max(14, Math.min(36, timeCard.height * 0.12)))
             visible: !win.showWeather
 
             // Weather pill button (top right)
             Rectangle {
                 anchors.top: parent.top
                 anchors.right: parent.right
-                height: 28
+                height: timeCard.weatherPillHeight
                 radius: Theme.rounding.full
                 color: weatherPillArea.containsMouse ? Theme.alpha(Theme.primary, 0.20) : Theme.alpha(Theme.surfaceVariant, 0.40)
                 border.color: weatherPillArea.containsMouse ? Theme.alpha(Theme.primary, 0.35) : Theme.alpha(Theme.outlineVariant, 0.15)
@@ -482,14 +531,14 @@ PanelWindow {
 
                     Icon {
                         name: Weather.icon
-                        size: 15
+                        size: timeCard.weatherIconSize
                         color: Theme.primary
                         anchors.verticalCenter: parent.verticalCenter
                     }
 
                     StyledText {
                         text: Weather.temp + " • " + Weather.condition
-                        font.pixelSize: 11
+                        font.pixelSize: timeCard.weatherFontSize
                         font.weight: Font.Medium
                         color: weatherPillArea.containsMouse ? Theme.text : Theme.textSecondary
                         anchors.verticalCenter: parent.verticalCenter
@@ -500,8 +549,9 @@ PanelWindow {
                     id: weatherPillArea
                     anchors.fill: parent
                     hoverEnabled: true
+                    preventStealing: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: win.showWeather = true
+                    onClicked: win.toggleWeather()
                 }
             }
 
@@ -510,17 +560,17 @@ PanelWindow {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: 12
-                spacing: 20
+                anchors.verticalCenterOffset: Math.round(timeCard.height * 0.08)
+                spacing: Math.round(Math.max(12, timeCard.clockFontSize * 0.25))
 
                 // Clock numbers
                 Row {
                     spacing: 2
-                    Layout.alignment: Qt.AlignBottom
+                    Layout.alignment: Qt.AlignVCenter
 
                     StyledText {
                         text: Qt.formatTime(win.currentTime, "hh")
-                        font.pixelSize: 64
+                        font.pixelSize: timeCard.clockFontSize
                         font.weight: Font.Bold
                         font.family: Theme.fonts.family
                         font.features: ({ "tnum": 1 })
@@ -529,7 +579,7 @@ PanelWindow {
 
                     StyledText {
                         text: ":"
-                        font.pixelSize: 58
+                        font.pixelSize: timeCard.colonFontSize
                         font.weight: Font.DemiBold
                         font.family: Theme.fonts.family
                         font.features: ({ "tnum": 1 })
@@ -539,7 +589,7 @@ PanelWindow {
 
                     StyledText {
                         text: Qt.formatTime(win.currentTime, "mm")
-                        font.pixelSize: 64
+                        font.pixelSize: timeCard.clockFontSize
                         font.weight: Font.Bold
                         font.family: Theme.fonts.family
                         font.features: ({ "tnum": 1 })
@@ -549,19 +599,19 @@ PanelWindow {
 
                 // Date column
                 ColumnLayout {
-                    spacing: 3
+                    spacing: Math.round(Math.max(2, timeCard.clockFontSize * 0.04))
                     Layout.alignment: Qt.AlignVCenter
 
                     StyledText {
                         text: Qt.formatDateTime(win.currentTime, "dddd")
-                        font.pixelSize: 19
+                        font.pixelSize: timeCard.dayFontSize
                         font.weight: Font.DemiBold
                         color: Theme.text
                     }
 
                     StyledText {
                         text: Qt.formatDateTime(win.currentTime, "d MMMM yyyy")
-                        font.pixelSize: 12
+                        font.pixelSize: timeCard.dateFontSize
                         font.weight: Font.Normal
                         color: Theme.textSecondary
                     }
@@ -574,43 +624,53 @@ PanelWindow {
         // --- WEATHER FORECAST VIEW ---
         Flickable {
             anchors.fill: parent
-            anchors.margins: 18
+            anchors.margins: Math.round(Math.max(12, Math.min(24, 18 * timeCard.weatherScale)))
             contentHeight: weatherContentCol.implicitHeight
             contentWidth: width
             clip: true
             visible: win.showWeather
+            interactive: contentHeight > height
 
             ColumnLayout {
                 id: weatherContentCol
                 width: parent.width
-                spacing: 12
+                spacing: Math.round(Math.max(8, Math.min(18, 12 * timeCard.weatherScale)))
 
                 // Header Bar: Back to Clock + Sunrise/Sunset
                 RowLayout {
                     Layout.fillWidth: true
 
                     Rectangle {
-                        height: 26
+                        z: 1100
+                        Layout.preferredHeight: timeCard.weatherBackBtnHeight
+                        Layout.preferredWidth: backRow.implicitWidth + 24
+                        height: timeCard.weatherBackBtnHeight
+                        width: backRow.implicitWidth + 24
                         radius: Theme.rounding.full
-                        color: backTimeArea.containsMouse ? Theme.alpha(Theme.primary, 0.22) : Theme.alpha(Theme.surfaceVariant, 0.40)
-                        border.color: Theme.alpha(Theme.outlineVariant, 0.20)
+                        color: backTimeArea.containsMouse ? Theme.alpha(Theme.primary, 0.25) : Theme.alpha(Theme.surfaceVariant, 0.50)
+                        border.color: backTimeArea.containsMouse ? Theme.alpha(Theme.primary, 0.45) : Theme.alpha(Theme.outlineVariant, 0.25)
                         border.width: 1
-                        width: backRow.implicitWidth + 16
+                        scale: backTimeArea.pressed ? 0.94 : (backTimeArea.containsMouse ? 1.04 : 1.0)
+
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Behavior on scale { NumberAnimation { duration: 120 } }
 
                         Row {
                             id: backRow
                             anchors.centerIn: parent
-                            spacing: 4
+                            spacing: 5
                             Icon {
                                 name: "arrow_back"
-                                size: 14
+                                size: timeCard.weatherBackBtnFontSize + 3
                                 color: Theme.primary
+                                anchors.verticalCenter: parent.verticalCenter
                             }
                             StyledText {
                                 text: "Clock"
-                                font.pixelSize: 11
-                                font.weight: Font.Medium
+                                font.pixelSize: timeCard.weatherBackBtnFontSize
+                                font.weight: Font.DemiBold
                                 color: Theme.text
+                                anchors.verticalCenter: parent.verticalCenter
                             }
                         }
 
@@ -618,24 +678,28 @@ PanelWindow {
                             id: backTimeArea
                             anchors.fill: parent
                             hoverEnabled: true
+                            preventStealing: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: win.showWeather = false
+                            onClicked: {
+                                console.log("[DesktopLayer] Back to Clock clicked!");
+                                win.toggleWeather();
+                            }
                         }
                     }
 
                     Item { Layout.fillWidth: true }
 
                     Row {
-                        spacing: 12
+                        spacing: Math.round(Math.max(10, 14 * timeCard.weatherScale))
                         Row {
-                            spacing: 4
-                            Icon { name: "wb_twilight"; size: 14; color: Theme.tertiary }
-                            StyledText { text: Weather.sunrise; font.pixelSize: 11; color: Theme.textSecondary }
+                            spacing: 5
+                            Icon { name: "wb_twilight"; size: timeCard.weatherChipIconSize; color: Theme.tertiary; anchors.verticalCenter: parent.verticalCenter }
+                            StyledText { text: Weather.sunrise; font.pixelSize: timeCard.weatherDateFontSize; color: Theme.textSecondary; anchors.verticalCenter: parent.verticalCenter }
                         }
                         Row {
-                            spacing: 4
-                            Icon { name: "bedtime"; size: 14; color: Theme.tertiary }
-                            StyledText { text: Weather.sunset; font.pixelSize: 11; color: Theme.textSecondary }
+                            spacing: 5
+                            Icon { name: "bedtime"; size: timeCard.weatherChipIconSize; color: Theme.tertiary; anchors.verticalCenter: parent.verticalCenter }
+                            StyledText { text: Weather.sunset; font.pixelSize: timeCard.weatherDateFontSize; color: Theme.textSecondary; anchors.verticalCenter: parent.verticalCenter }
                         }
                     }
                 }
@@ -643,19 +707,19 @@ PanelWindow {
                 // Main Weather Info: City + Temp + Condition
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 14
+                    spacing: Math.round(Math.max(12, 16 * timeCard.weatherScale))
 
                     ColumnLayout {
                         spacing: 2
                         StyledText {
                             text: Weather.city
-                            font.pixelSize: 20
+                            font.pixelSize: timeCard.weatherCityFontSize
                             font.weight: Font.Bold
                             color: Theme.text
                         }
                         StyledText {
                             text: Qt.formatDate(win.currentTime, "dddd, MMMM d")
-                            font.pixelSize: 11
+                            font.pixelSize: timeCard.weatherDateFontSize
                             color: Theme.textSecondary
                         }
                     }
@@ -663,35 +727,35 @@ PanelWindow {
                     Item { Layout.fillWidth: true }
 
                     RowLayout {
-                        spacing: 10
+                        spacing: Math.round(Math.max(8, 12 * timeCard.weatherScale))
                         Icon {
                             name: Weather.icon
-                            size: 38
+                            size: timeCard.weatherBigIconSize
                             color: Theme.primaryFixed
                         }
                         ColumnLayout {
                             spacing: 0
                             Row {
-                                spacing: 4
+                                spacing: 6
                                 StyledText {
                                     text: Weather.temp
-                                    font.pixelSize: 28
+                                    font.pixelSize: timeCard.weatherTempFontSize
                                     font.weight: Font.Bold
                                     color: Theme.primary
                                 }
                                 Rectangle {
                                     anchors.verticalCenter: parent.verticalCenter
-                                    height: 18
-                                    width: 28
+                                    height: Math.round(Math.max(18, 22 * timeCard.weatherScale))
+                                    width: Math.round(Math.max(28, 34 * timeCard.weatherScale))
                                     radius: Theme.rounding.full
-                                    color: unitToggleArea.containsMouse ? Theme.alpha(Theme.primary, 0.20) : Theme.alpha(Theme.surfaceVariant, 0.40)
-                                    border.color: Theme.alpha(Theme.outlineVariant, 0.20)
+                                    color: unitToggleArea.containsMouse ? Theme.alpha(Theme.primary, 0.25) : Theme.alpha(Theme.surfaceVariant, 0.45)
+                                    border.color: Theme.alpha(Theme.outlineVariant, 0.25)
                                     border.width: 1
 
                                     StyledText {
                                         anchors.centerIn: parent
                                         text: Weather.useFahrenheit ? "°C" : "°F"
-                                        font.pixelSize: 9
+                                        font.pixelSize: Math.round(Math.max(9, 11 * timeCard.weatherScale))
                                         font.weight: Font.Bold
                                         color: Theme.textSecondary
                                     }
@@ -700,6 +764,7 @@ PanelWindow {
                                         id: unitToggleArea
                                         anchors.fill: parent
                                         hoverEnabled: true
+                                        preventStealing: true
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: Weather.toggleUnit()
                                     }
@@ -707,7 +772,7 @@ PanelWindow {
                             }
                             StyledText {
                                 text: Weather.condition
-                                font.pixelSize: 11
+                                font.pixelSize: timeCard.weatherChipFontSize
                                 color: Theme.textSecondary
                             }
                         }
@@ -717,44 +782,44 @@ PanelWindow {
                 // 3 Details Cards
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 8
+                    spacing: Math.round(Math.max(6, 10 * timeCard.weatherScale))
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 36
+                        height: timeCard.weatherChipHeight
                         radius: Theme.rounding.md
                         color: Theme.alpha(Theme.surfaceVariant, 0.35)
                         RowLayout {
                             anchors.centerIn: parent
-                            spacing: 5
-                            Icon { name: "water_drop"; size: 14; color: Theme.secondary }
-                            StyledText { text: Weather.humidity; font.pixelSize: 11; color: Theme.text }
+                            spacing: 6
+                            Icon { name: "water_drop"; size: timeCard.weatherChipIconSize; color: Theme.secondary }
+                            StyledText { text: Weather.humidity + "% humidity"; font.pixelSize: timeCard.weatherChipFontSize; color: Theme.text }
                         }
                     }
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 36
+                        height: timeCard.weatherChipHeight
                         radius: Theme.rounding.md
                         color: Theme.alpha(Theme.surfaceVariant, 0.35)
                         RowLayout {
                             anchors.centerIn: parent
-                            spacing: 5
-                            Icon { name: "thermostat"; size: 14; color: Theme.primary }
-                            StyledText { text: Weather.feelsLike; font.pixelSize: 11; color: Theme.text }
+                            spacing: 6
+                            Icon { name: "thermostat"; size: timeCard.weatherChipIconSize; color: Theme.primary }
+                            StyledText { text: "Feels " + Weather.feelsLike; font.pixelSize: timeCard.weatherChipFontSize; color: Theme.text }
                         }
                     }
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 36
+                        height: timeCard.weatherChipHeight
                         radius: Theme.rounding.md
                         color: Theme.alpha(Theme.surfaceVariant, 0.35)
                         RowLayout {
                             anchors.centerIn: parent
-                            spacing: 5
-                            Icon { name: "air"; size: 14; color: Theme.tertiary }
-                            StyledText { text: Weather.windSpeed; font.pixelSize: 11; color: Theme.text }
+                            spacing: 6
+                            Icon { name: "air"; size: timeCard.weatherChipIconSize; color: Theme.tertiary }
+                            StyledText { text: Weather.windSpeed; font.pixelSize: timeCard.weatherChipFontSize; color: Theme.text }
                         }
                     }
                 }
@@ -762,25 +827,25 @@ PanelWindow {
                 // 7-Day Forecast Row
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 5
+                    spacing: Math.round(Math.max(4, 6 * timeCard.weatherScale))
 
                     Repeater {
-                        model: Weather.forecastDays
+                        model: Weather.forecast
 
                         Rectangle {
                             required property var modelData
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 74
+                            Layout.preferredHeight: timeCard.weatherForecastCardHeight
                             radius: Theme.rounding.md
                             color: Theme.alpha(Theme.surfaceVariant, 0.30)
 
                             ColumnLayout {
                                 anchors.centerIn: parent
-                                spacing: 2
+                                spacing: Math.round(Math.max(2, 4 * timeCard.weatherScale))
 
                                 StyledText {
                                     text: modelData.day
-                                    font.pixelSize: 10
+                                    font.pixelSize: timeCard.weatherForecastDayFont
                                     font.weight: Font.Medium
                                     color: Theme.textSecondary
                                     Layout.alignment: Qt.AlignHCenter
@@ -788,16 +853,24 @@ PanelWindow {
 
                                 Icon {
                                     name: modelData.icon
-                                    size: 18
+                                    size: timeCard.weatherForecastIconSize
                                     color: Theme.primary
                                     Layout.alignment: Qt.AlignHCenter
                                 }
 
                                 StyledText {
-                                    text: modelData.maxTemp + "°"
-                                    font.pixelSize: 10
+                                    text: modelData.formattedMax || (modelData.maxTemp + "°")
+                                    font.pixelSize: timeCard.weatherForecastTempFont
                                     font.weight: Font.Bold
                                     color: Theme.text
+                                    Layout.alignment: Qt.AlignHCenter
+                                }
+
+                                StyledText {
+                                    text: modelData.formattedMin || (modelData.minTemp + "°")
+                                    font.pixelSize: Math.max(9, timeCard.weatherForecastTempFont - 2)
+                                    font.weight: Font.Normal
+                                    color: Theme.textSecondary
                                     Layout.alignment: Qt.AlignHCenter
                                 }
                             }
@@ -825,10 +898,23 @@ PanelWindow {
         hoverable: true
         onGeometryChangedByUser: win.saveLayout()
 
+        // Dynamic Responsive Content Sizing
+        readonly property int coverSize: Math.round(Math.min(130, Math.max(48, height * 0.36)))
+        readonly property int playFabSize: Math.round(Math.min(64, Math.max(34, height * 0.25)))
+        readonly property int skipBtnSize: Math.round(Math.min(48, Math.max(26, playFabSize * 0.78)))
+        readonly property int auxBtnSize: Math.round(Math.min(40, Math.max(22, playFabSize * 0.65)))
+        readonly property int titleFontSize: Math.round(Math.min(24, Math.max(13, height * 0.092)))
+        readonly property int artistFontSize: Math.round(Math.min(18, Math.max(11, height * 0.076)))
+        readonly property int seekTrackHeight: Math.round(Math.min(9, Math.max(4, height * 0.034)))
+        readonly property int timeFontSize: Math.round(Math.min(14, Math.max(9, height * 0.065)))
+        readonly property int volBarWidth: Math.round(Math.min(120, Math.max(48, width * 0.12)))
+        readonly property int volBarHeight: Math.round(Math.min(8, Math.max(3, height * 0.026)))
+        readonly property int badgeHeight: Math.round(Math.min(34, Math.max(22, height * 0.15)))
+
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 14
-            spacing: 8
+            anchors.margins: Math.round(Math.max(10, Math.min(22, musicCard.height * 0.09)))
+            spacing: Math.round(Math.max(4, Math.min(14, musicCard.height * 0.05)))
 
             // Top Bar: Player Source Badge + Navigation Dots + Volume Slider
             RowLayout {
@@ -837,7 +923,7 @@ PanelWindow {
 
                 // Source Identity Chip (clickable to switch)
                 Rectangle {
-                    height: 24
+                    height: musicCard.badgeHeight
                     radius: Theme.rounding.full
                     color: sourceBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.18) : Theme.alpha(Theme.surfaceVariant, 0.45)
                     border.color: sourceBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.35) : Theme.alpha(Theme.outlineVariant, 0.15)
@@ -852,13 +938,13 @@ PanelWindow {
 
                         IconImage {
                             source: Quickshell.iconPath(win.getPlayerIcon(win.currentPlayer), "multimedia-player")
-                            implicitSize: 13
+                            implicitSize: Math.round(Math.min(18, Math.max(12, musicCard.height * 0.08)))
                             anchors.verticalCenter: parent.verticalCenter
                         }
 
                         StyledText {
                             text: win.getPlayerIdentity(win.currentPlayer)
-                            font.pixelSize: 11
+                            font.pixelSize: Math.round(Math.min(14, Math.max(10, musicCard.height * 0.07)))
                             font.weight: Font.Medium
                             color: sourceBadgeArea.containsMouse ? Theme.text : Theme.textSecondary
                             anchors.verticalCenter: parent.verticalCenter
@@ -869,10 +955,49 @@ PanelWindow {
                         id: sourceBadgeArea
                         anchors.fill: parent
                         hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (win.playerCount > 1) {
-                                win.currentPlayerIndex = (win.clampedPlayerIndex + 1) % win.playerCount;
+                        cursorShape: isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+
+                        property real startScreenX: 0
+                        property real startScreenY: 0
+                        property bool isDragging: false
+
+                        onPressed: (mouse) => {
+                            isDragging = false;
+                            if (musicCard.parent) {
+                                const p = mapToItem(musicCard.parent, mouse.x, mouse.y);
+                                startScreenX = p.x;
+                                startScreenY = p.y;
+                            }
+                        }
+
+                        onPositionChanged: (mouse) => {
+                            if (pressed && musicCard.parent) {
+                                const p = mapToItem(musicCard.parent, mouse.x, mouse.y);
+                                if (!isDragging && (Math.abs(p.x - startScreenX) > 6 || Math.abs(p.y - startScreenY) > 6)) {
+                                    isDragging = true;
+                                    musicCard.startMoving(startScreenX, startScreenY);
+                                }
+                                if (isDragging) {
+                                    musicCard.moveWidget(p.x, p.y);
+                                }
+                            }
+                        }
+
+                        onReleased: (mouse) => {
+                            if (isDragging) {
+                                isDragging = false;
+                                musicCard.stopMoving();
+                            } else {
+                                if (win.playerCount > 1) {
+                                    win.currentPlayerIndex = (win.clampedPlayerIndex + 1) % win.playerCount;
+                                }
+                            }
+                        }
+
+                        onCanceled: {
+                            if (isDragging) {
+                                isDragging = false;
+                                musicCard.stopMoving();
                             }
                         }
                     }
@@ -913,7 +1038,7 @@ PanelWindow {
                     Icon {
                         anchors.verticalCenter: parent.verticalCenter
                         name: (win.playerVolume <= 0.01) ? "volume_off" : (win.playerVolume < 0.5 ? "volume_down" : "volume_up")
-                        size: 16
+                        size: Math.round(Math.min(22, Math.max(14, musicCard.height * 0.10)))
                         color: volIconArea.containsMouse ? Theme.primary : Theme.textSecondary
 
                         MouseArea {
@@ -927,8 +1052,8 @@ PanelWindow {
 
                     Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
-                        width: 52
-                        height: 4
+                        width: musicCard.volBarWidth
+                        height: musicCard.volBarHeight
                         radius: Theme.rounding.full
                         color: Theme.alpha(Theme.secondaryContainer, 0.45)
 
@@ -958,7 +1083,7 @@ PanelWindow {
                     StyledText {
                         anchors.verticalCenter: parent.verticalCenter
                         text: Math.round(win.playerVolume * 100) + "%"
-                        font.pixelSize: 10
+                        font.pixelSize: musicCard.timeFontSize
                         font.features: ({ "tnum": 1 })
                         color: Theme.textSecondary
                     }
@@ -972,9 +1097,9 @@ PanelWindow {
 
                 // Cover Art
                 Rectangle {
-                    Layout.preferredWidth: 54
-                    Layout.preferredHeight: 54
-                    radius: 14
+                    Layout.preferredWidth: musicCard.coverSize
+                    Layout.preferredHeight: musicCard.coverSize
+                    radius: Math.round(musicCard.coverSize * 0.24)
                     color: Theme.alpha(Theme.surfaceContainerHigh, 0.60)
                     border.color: Theme.alpha(Theme.outlineVariant, 0.20)
                     border.width: 1
@@ -991,7 +1116,7 @@ PanelWindow {
                     Icon {
                         anchors.centerIn: parent
                         name: "music_note"
-                        size: 24
+                        size: Math.round(musicCard.coverSize * 0.44)
                         color: Theme.primaryFixed
                         visible: win.trackArtUrl === ""
                     }
@@ -1004,7 +1129,7 @@ PanelWindow {
 
                     StyledText {
                         text: win.trackTitle
-                        font.pixelSize: 14
+                        font.pixelSize: musicCard.titleFontSize
                         font.weight: Font.DemiBold
                         color: Theme.text
                         elide: Text.ElideRight
@@ -1013,7 +1138,7 @@ PanelWindow {
 
                     StyledText {
                         text: win.trackArtist
-                        font.pixelSize: 12
+                        font.pixelSize: musicCard.artistFontSize
                         font.weight: Font.Normal
                         color: Theme.textSecondary
                         elide: Text.ElideRight
@@ -1023,18 +1148,18 @@ PanelWindow {
 
                 // Controls Row
                 RowLayout {
-                    spacing: 4
+                    spacing: Math.round(Math.max(2, musicCard.height * 0.025))
                     Layout.alignment: Qt.AlignVCenter
 
                     // Shuffle Button
                     Rectangle {
-                        width: 28; height: 28
+                        width: musicCard.auxBtnSize; height: musicCard.auxBtnSize
                         radius: Theme.rounding.full
                         color: win.isShuffle ? Theme.alpha(Theme.primary, 0.20) : "transparent"
                         Icon {
                             anchors.centerIn: parent
                             name: "shuffle"
-                            size: 15
+                            size: Math.round(musicCard.auxBtnSize * 0.52)
                             color: win.isShuffle ? Theme.primary : Theme.textSecondary
                         }
                         MouseArea {
@@ -1048,23 +1173,59 @@ PanelWindow {
 
                     // Previous Track Button
                     Rectangle {
-                        width: 32; height: 32
+                        width: musicCard.skipBtnSize; height: musicCard.skipBtnSize
                         radius: Theme.rounding.full
                         color: prevArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.85) : Theme.alpha(Theme.surfaceContainerHigh, 0.40)
                         scale: prevArea.pressed ? 0.92 : 1.0
-                        Icon { anchors.centerIn: parent; name: "skip_previous"; size: 17; color: Theme.text }
+                        Icon { anchors.centerIn: parent; name: "skip_previous"; size: Math.round(musicCard.skipBtnSize * 0.52); color: Theme.text }
                         MouseArea {
                             id: prevArea
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: win.prevTrack()
+                            cursorShape: isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+
+                            property real startScreenX: 0
+                            property real startScreenY: 0
+                            property bool isDragging: false
+
+                            onPressed: (mouse) => {
+                                isDragging = false;
+                                if (musicCard.parent) {
+                                    const p = mapToItem(musicCard.parent, mouse.x, mouse.y);
+                                    startScreenX = p.x;
+                                    startScreenY = p.y;
+                                }
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (pressed && musicCard.parent) {
+                                    const p = mapToItem(musicCard.parent, mouse.x, mouse.y);
+                                    if (!isDragging && (Math.abs(p.x - startScreenX) > 6 || Math.abs(p.y - startScreenY) > 6)) {
+                                        isDragging = true;
+                                        musicCard.startMoving(startScreenX, startScreenY);
+                                    }
+                                    if (isDragging) musicCard.moveWidget(p.x, p.y);
+                                }
+                            }
+                            onReleased: (mouse) => {
+                                if (isDragging) {
+                                    isDragging = false;
+                                    musicCard.stopMoving();
+                                } else {
+                                    win.prevTrack();
+                                }
+                            }
+                            onCanceled: {
+                                if (isDragging) {
+                                    isDragging = false;
+                                    musicCard.stopMoving();
+                                }
+                            }
                         }
                     }
 
                     // Large Play/Pause FAB Button
                     Rectangle {
-                        width: 40; height: 40
+                        width: musicCard.playFabSize; height: musicCard.playFabSize
                         radius: Theme.rounding.full
                         color: Theme.primary
                         scale: playFabArea.pressed ? 0.92 : (playFabArea.containsMouse ? 1.04 : 1.0)
@@ -1073,7 +1234,7 @@ PanelWindow {
                         Icon {
                             anchors.centerIn: parent
                             name: win.isPlaying ? "pause" : "play_arrow"
-                            size: 22
+                            size: Math.round(musicCard.playFabSize * 0.55)
                             color: Theme.onPrimary
                         }
 
@@ -1081,36 +1242,108 @@ PanelWindow {
                             id: playFabArea
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: win.togglePlayPause()
+                            cursorShape: isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+
+                            property real startScreenX: 0
+                            property real startScreenY: 0
+                            property bool isDragging: false
+
+                            onPressed: (mouse) => {
+                                isDragging = false;
+                                if (musicCard.parent) {
+                                    const p = mapToItem(musicCard.parent, mouse.x, mouse.y);
+                                    startScreenX = p.x;
+                                    startScreenY = p.y;
+                                }
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (pressed && musicCard.parent) {
+                                    const p = mapToItem(musicCard.parent, mouse.x, mouse.y);
+                                    if (!isDragging && (Math.abs(p.x - startScreenX) > 6 || Math.abs(p.y - startScreenY) > 6)) {
+                                        isDragging = true;
+                                        musicCard.startMoving(startScreenX, startScreenY);
+                                    }
+                                    if (isDragging) musicCard.moveWidget(p.x, p.y);
+                                }
+                            }
+                            onReleased: (mouse) => {
+                                if (isDragging) {
+                                    isDragging = false;
+                                    musicCard.stopMoving();
+                                } else {
+                                    win.togglePlayPause();
+                                }
+                            }
+                            onCanceled: {
+                                if (isDragging) {
+                                    isDragging = false;
+                                    musicCard.stopMoving();
+                                }
+                            }
                         }
                     }
 
                     // Next Track Button
                     Rectangle {
-                        width: 32; height: 32
+                        width: musicCard.skipBtnSize; height: musicCard.skipBtnSize
                         radius: Theme.rounding.full
                         color: nextArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.85) : Theme.alpha(Theme.surfaceContainerHigh, 0.40)
                         scale: nextArea.pressed ? 0.92 : 1.0
-                        Icon { anchors.centerIn: parent; name: "skip_next"; size: 17; color: Theme.text }
+                        Icon { anchors.centerIn: parent; name: "skip_next"; size: Math.round(musicCard.skipBtnSize * 0.52); color: Theme.text }
                         MouseArea {
                             id: nextArea
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: win.nextTrack()
+                            cursorShape: isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+
+                            property real startScreenX: 0
+                            property real startScreenY: 0
+                            property bool isDragging: false
+
+                            onPressed: (mouse) => {
+                                isDragging = false;
+                                if (musicCard.parent) {
+                                    const p = mapToItem(musicCard.parent, mouse.x, mouse.y);
+                                    startScreenX = p.x;
+                                    startScreenY = p.y;
+                                }
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (pressed && musicCard.parent) {
+                                    const p = mapToItem(musicCard.parent, mouse.x, mouse.y);
+                                    if (!isDragging && (Math.abs(p.x - startScreenX) > 6 || Math.abs(p.y - startScreenY) > 6)) {
+                                        isDragging = true;
+                                        musicCard.startMoving(startScreenX, startScreenY);
+                                    }
+                                    if (isDragging) musicCard.moveWidget(p.x, p.y);
+                                }
+                            }
+                            onReleased: (mouse) => {
+                                if (isDragging) {
+                                    isDragging = false;
+                                    musicCard.stopMoving();
+                                } else {
+                                    win.nextTrack();
+                                }
+                            }
+                            onCanceled: {
+                                if (isDragging) {
+                                    isDragging = false;
+                                    musicCard.stopMoving();
+                                }
+                            }
                         }
                     }
 
                     // Repeat Button
                     Rectangle {
-                        width: 28; height: 28
+                        width: musicCard.auxBtnSize; height: musicCard.auxBtnSize
                         radius: Theme.rounding.full
                         color: win.loopState > 0 ? Theme.alpha(Theme.primary, 0.20) : "transparent"
                         Icon {
                             anchors.centerIn: parent
                             name: win.loopState === 1 ? "repeat_one" : "repeat"
-                            size: 15
+                            size: Math.round(musicCard.auxBtnSize * 0.52)
                             color: win.loopState > 0 ? Theme.primary : Theme.textSecondary
                         }
                         MouseArea {
@@ -1131,7 +1364,7 @@ PanelWindow {
 
                 StyledText {
                     text: win.formatTime(win.isDraggingSeek ? win.dragSeekPos : win.trackPosSec)
-                    font.pixelSize: 10
+                    font.pixelSize: musicCard.timeFontSize
                     font.features: ({ "tnum": 1 })
                     color: Theme.textSecondary
                 }
@@ -1139,7 +1372,7 @@ PanelWindow {
                 Rectangle {
                     id: progTrack
                     Layout.fillWidth: true
-                    height: 5
+                    height: musicCard.seekTrackHeight
                     radius: Theme.rounding.full
                     color: Theme.alpha(Theme.secondaryContainer, 0.45)
 
@@ -1192,7 +1425,7 @@ PanelWindow {
 
                 StyledText {
                     text: win.formatTime(win.trackLenSec)
-                    font.pixelSize: 10
+                    font.pixelSize: musicCard.timeFontSize
                     font.features: ({ "tnum": 1 })
                     color: Theme.textSecondary
                 }
@@ -1212,15 +1445,26 @@ PanelWindow {
         height: 248
         minWidth: 320
         maxWidth: 850
-        minHeight: 160
-        maxHeight: 550
+        minHeight: 110
+        maxHeight: 650
         hoverable: true
         onGeometryChangedByUser: win.saveLayout()
 
+        // Dynamic Responsive Content Sizing (Independent of height so resizing height shrinks empty space!)
+        readonly property real stScale: Math.max(0.9, Math.min(1.3, width / 440))
+        readonly property int headerFontSize: Math.round(Math.min(26, Math.max(14, 15 * stScale)))
+        readonly property int totalBadgeHeight: Math.round(Math.min(34, Math.max(20, 22 * stScale)))
+        readonly property int totalFontSize: Math.round(Math.min(16, Math.max(10, 11 * stScale)))
+        readonly property int appIconSize: Math.round(Math.min(32, Math.max(16, 18 * stScale)))
+        readonly property int appNameFontSize: Math.round(Math.min(18, Math.max(12, 13 * stScale)))
+        readonly property int appTimeFontSize: Math.round(Math.min(16, Math.max(11, 12 * stScale)))
+        readonly property int barHeight: Math.round(Math.min(8, Math.max(4, 5 * stScale)))
+        readonly property int rowSpacing: Math.round(Math.max(8, 10 * stScale))
+
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 16
-            spacing: 10
+            anchors.margins: Math.round(Math.max(12, Math.min(26, 16 * screenTimeCard.stScale)))
+            spacing: Math.round(Math.max(6, Math.min(16, 10 * screenTimeCard.stScale)))
 
             // Header Row: Title + Total Badge + Daily/Weekly Switch
             RowLayout {
@@ -1229,13 +1473,13 @@ PanelWindow {
 
                 StyledText {
                     text: "Screen Time"
-                    font.pixelSize: 15
+                    font.pixelSize: screenTimeCard.headerFontSize
                     font.weight: Font.DemiBold
                     color: Theme.text
                 }
 
                 Rectangle {
-                    height: 22
+                    height: screenTimeCard.totalBadgeHeight
                     radius: Theme.rounding.full
                     color: Theme.alpha(Theme.primary, 0.15)
                     Layout.preferredWidth: stTotalText.implicitWidth + 14
@@ -1244,7 +1488,7 @@ PanelWindow {
                         id: stTotalText
                         anchors.centerIn: parent
                         text: (win.screenTimeView === 0 ? ScreenTime.todayTotalFormatted : ScreenTime.weekTotalFormatted) || "0m"
-                        font.pixelSize: 11
+                        font.pixelSize: screenTimeCard.totalFontSize
                         font.weight: Font.DemiBold
                         color: Theme.primary
                     }
@@ -1253,6 +1497,7 @@ PanelWindow {
                 Item { Layout.fillWidth: true }
 
                 SegmentedSwitch {
+                    card: screenTimeCard
                     currentIndex: win.screenTimeView
                     onSelectionChanged: function(idx) { win.screenTimeView = idx; }
                 }
@@ -1270,12 +1515,12 @@ PanelWindow {
                 ColumnLayout {
                     id: stContentCol
                     width: parent.width
-                    spacing: 8
+                    spacing: screenTimeCard.rowSpacing
 
                     StyledText {
                         visible: (win.screenTimeView === 0 ? ScreenTime.todayModel.count : ScreenTime.weekModel.count) === 0
                         text: "No active application usage recorded yet"
-                        font.pixelSize: 12
+                        font.pixelSize: screenTimeCard.appNameFontSize
                         color: Theme.textSecondary
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
@@ -1296,12 +1541,12 @@ PanelWindow {
 
                                 IconImage {
                                     source: model.icon ? (model.icon.startsWith("/") ? ("file://" + model.icon) : Quickshell.iconPath(model.icon, model.fallback)) : ""
-                                    implicitSize: 16
+                                    implicitSize: screenTimeCard.appIconSize
                                 }
 
                                 StyledText {
                                     text: model.name || ""
-                                    font.pixelSize: 12
+                                    font.pixelSize: screenTimeCard.appNameFontSize
                                     font.weight: Font.Medium
                                     color: Theme.text
                                 }
@@ -1309,8 +1554,8 @@ PanelWindow {
                                 Item { Layout.fillWidth: true }
 
                                 StyledText {
-                                    text: model.time ? (model.time + " (" + Math.round((model.pct || 0) * 100) + "%)") : ""
-                                    font.pixelSize: 11
+                                    text: model.time ? (model.time + " (" + (model.pctStr || (Math.round((model.pct || 0) * 100) + "%")) + ")") : ""
+                                    font.pixelSize: screenTimeCard.appTimeFontSize
                                     font.weight: Font.Medium
                                     color: Theme.textSecondary
                                 }
@@ -1318,7 +1563,7 @@ PanelWindow {
 
                             Rectangle {
                                 Layout.fillWidth: true
-                                height: 4
+                                height: screenTimeCard.barHeight
                                 radius: Theme.rounding.full
                                 color: Theme.alpha(Theme.secondaryContainer, 0.45)
 
@@ -1332,7 +1577,7 @@ PanelWindow {
                                         NumberAnimation {
                                             duration: Theme.anim.normal
                                             easing.type: Theme.anim.easingCurve
-                                        }
+                                            }
                                     }
                                 }
                             }
@@ -1340,8 +1585,6 @@ PanelWindow {
                     }
                 }
             }
-
-            Item { Layout.fillHeight: true }
         }
     }
 
@@ -1362,10 +1605,15 @@ PanelWindow {
         hoverable: true
         onGeometryChangedByUser: win.saveLayout()
 
+        // Dynamic Responsive Content Sizing
+        readonly property int headerFontSize: Math.round(Math.min(26, Math.max(14, width * 0.035)))
+        readonly property real targetTileW: Math.max(80, Math.min(140, (width - 36) / 4.1))
+        readonly property int gridSpacing: Math.round(Math.min(16, Math.max(6, targetTileW * 0.09)))
+
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 18
-            spacing: 12
+            anchors.margins: Math.round(Math.max(12, Math.min(28, appDrawerCard.width * 0.04)))
+            spacing: Math.round(Math.max(8, Math.min(20, appDrawerCard.height * 0.02)))
 
             // Header Bar
             RowLayout {
@@ -1373,27 +1621,9 @@ PanelWindow {
 
                 StyledText {
                     text: "Applications"
-                    font.pixelSize: 15
+                    font.pixelSize: appDrawerCard.headerFontSize
                     font.weight: Font.DemiBold
                     color: Theme.text
-                }
-
-                Item { Layout.fillWidth: true }
-
-                Rectangle {
-                    height: 22
-                    radius: Theme.rounding.full
-                    color: Theme.alpha(Theme.surfaceVariant, 0.40)
-                    Layout.preferredWidth: appCountText.implicitWidth + 14
-
-                    StyledText {
-                        id: appCountText
-                        anchors.centerIn: parent
-                        text: "12 apps"
-                        font.pixelSize: 11
-                        font.weight: Font.Medium
-                        color: Theme.textSecondary
-                    }
                 }
             }
 
@@ -1410,9 +1640,9 @@ PanelWindow {
                     id: appGrid
                     width: parent.width
                     // Responsive column calculation based on drawer width
-                    columns: Math.max(2, Math.floor((width - 16) / 105))
-                    rowSpacing: 10
-                    columnSpacing: 10
+                    columns: Math.max(2, Math.floor((width - 8) / appDrawerCard.targetTileW))
+                    rowSpacing: appDrawerCard.gridSpacing
+                    columnSpacing: appDrawerCard.gridSpacing
 
                     Repeater {
                         model: [
@@ -1432,11 +1662,11 @@ PanelWindow {
 
                         AppIconTile {
                             required property var modelData
+                            card: appDrawerCard
                             name: modelData.name
                             icon: modelData.icon
                             fallback: modelData.fallback
                             execCmd: modelData.exec
-                            iconSize: 46
                         }
                     }
                 }

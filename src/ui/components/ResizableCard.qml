@@ -36,62 +36,73 @@ Rectangle {
     }
 
     // ==========================================
-    // 1. SUPER + DRAG (Move individual widget)
+    // 1. DIRECT DRAG TO MOVE (Grab anywhere to place)
     // ==========================================
+    property bool isDraggingWidget: false
+    property real dragStartScreenX: 0
+    property real dragStartScreenY: 0
+    property real dragStartWidgetX: 0
+    property real dragStartWidgetY: 0
+
+    function startMoving(screenX, screenY) {
+        isDraggingWidget = true;
+        dragStartWidgetX = root.x;
+        dragStartWidgetY = root.y;
+        dragStartScreenX = screenX;
+        dragStartScreenY = screenY;
+    }
+
+    function moveWidget(screenX, screenY) {
+        if (isDraggingWidget && root.parent) {
+            const dx = screenX - dragStartScreenX;
+            const dy = screenY - dragStartScreenY;
+            const maxX = Math.max(0, root.parent.width - root.width);
+            const maxY = Math.max(0, root.parent.height - root.height);
+            root.x = Math.max(0, Math.min(maxX, dragStartWidgetX + dx));
+            root.y = Math.max(0, Math.min(maxY, dragStartWidgetY + dy));
+        }
+    }
+
+    function stopMoving() {
+        if (isDraggingWidget) {
+            isDraggingWidget = false;
+            root.geometryChangedByUser();
+        }
+    }
+
     MouseArea {
-        id: superDragArea
+        id: baseDragArea
         anchors.fill: parent
-        z: 900 // Above card background, below border resize handles (z: 1000)
-        hoverEnabled: false
+        z: 0 // Card background plane: catches clicks on background, margins, text, and artwork
         acceptedButtons: Qt.LeftButton
-
-        property bool isMoving: false
-        property real startScreenX: 0
-        property real startScreenY: 0
-        property real startWidgetX: 0
-        property real startWidgetY: 0
-
-        cursorShape: isMoving ? Qt.ClosedHandCursor : Qt.ArrowCursor
+        cursorShape: root.isDraggingWidget ? Qt.ClosedHandCursor : Qt.ArrowCursor
 
         onPressed: (mouse) => {
-            if (mouse.modifiers & Qt.MetaModifier) {
-                isMoving = true;
-                startWidgetX = root.x;
-                startWidgetY = root.y;
-                const p = mapToItem(root.parent, mouse.x, mouse.y);
-                startScreenX = p.x;
-                startScreenY = p.y;
-                mouse.accepted = true;
-            } else {
-                mouse.accepted = false; // Fall through to child interactive items!
-            }
+            const p = mapToItem(root.parent, mouse.x, mouse.y);
+            root.startMoving(p.x, p.y);
         }
 
         onPositionChanged: (mouse) => {
-            if (isMoving && root.parent) {
+            if (pressed && root.isDraggingWidget) {
                 const p = mapToItem(root.parent, mouse.x, mouse.y);
-                const dx = p.x - startScreenX;
-                const dy = p.y - startScreenY;
-                const maxX = Math.max(0, root.parent.width - root.width);
-                const maxY = Math.max(0, root.parent.height - root.height);
-                root.x = Math.max(0, Math.min(maxX, startWidgetX + dx));
-                root.y = Math.max(0, Math.min(maxY, startWidgetY + dy));
+                root.moveWidget(p.x, p.y);
             }
         }
 
         onReleased: (mouse) => {
-            if (isMoving) {
-                isMoving = false;
-                root.geometryChangedByUser();
-            }
+            root.stopMoving();
+        }
+
+        onCanceled: {
+            root.stopMoving();
         }
     }
 
     // ==========================================
     // 2. CORNER & EDGE RESIZE HITBOXES (z: 1000)
     // ==========================================
-    readonly property int edgeHitSize: 8
-    readonly property int cornerHitSize: 18
+    readonly property int edgeHitSize: 12
+    readonly property int cornerHitSize: 22
 
     Item {
         id: resizeHandles
@@ -128,6 +139,7 @@ Rectangle {
             height: root.edgeHitSize
             cursorShape: Qt.SizeVerCursor
             hoverEnabled: true
+            preventStealing: true
 
             onPressed: (mouse) => {
                 const p = mapToItem(root.parent, mouse.x, mouse.y);
@@ -155,6 +167,7 @@ Rectangle {
             height: root.edgeHitSize
             cursorShape: Qt.SizeVerCursor
             hoverEnabled: true
+            preventStealing: true
 
             onPressed: (mouse) => {
                 const p = mapToItem(root.parent, mouse.x, mouse.y);
@@ -180,6 +193,7 @@ Rectangle {
             width: root.edgeHitSize
             cursorShape: Qt.SizeHorCursor
             hoverEnabled: true
+            preventStealing: true
 
             onPressed: (mouse) => {
                 const p = mapToItem(root.parent, mouse.x, mouse.y);
@@ -207,6 +221,7 @@ Rectangle {
             width: root.edgeHitSize
             cursorShape: Qt.SizeHorCursor
             hoverEnabled: true
+            preventStealing: true
 
             onPressed: (mouse) => {
                 const p = mapToItem(root.parent, mouse.x, mouse.y);
@@ -230,6 +245,7 @@ Rectangle {
             height: root.cornerHitSize
             cursorShape: Qt.SizeFDiagCursor
             hoverEnabled: true
+            preventStealing: true
 
             onPressed: (mouse) => {
                 const p = mapToItem(root.parent, mouse.x, mouse.y);
@@ -259,6 +275,7 @@ Rectangle {
             height: root.cornerHitSize
             cursorShape: Qt.SizeBDiagCursor
             hoverEnabled: true
+            preventStealing: true
 
             onPressed: (mouse) => {
                 const p = mapToItem(root.parent, mouse.x, mouse.y);
@@ -286,6 +303,7 @@ Rectangle {
             height: root.cornerHitSize
             cursorShape: Qt.SizeBDiagCursor
             hoverEnabled: true
+            preventStealing: true
 
             onPressed: (mouse) => {
                 const p = mapToItem(root.parent, mouse.x, mouse.y);
@@ -313,6 +331,7 @@ Rectangle {
             height: root.cornerHitSize
             cursorShape: Qt.SizeFDiagCursor
             hoverEnabled: true
+            preventStealing: true
 
             onPressed: (mouse) => {
                 const p = mapToItem(root.parent, mouse.x, mouse.y);

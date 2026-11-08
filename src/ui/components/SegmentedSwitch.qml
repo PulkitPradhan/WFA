@@ -8,6 +8,7 @@ Rectangle {
     id: root
 
     property int currentIndex: 0
+    property var card: null
     signal selectionChanged(int index)
 
     width: 114
@@ -52,12 +53,53 @@ Rectangle {
             }
 
             MouseArea {
+                id: todayArea
                 anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    if (root.currentIndex !== 0) {
-                        root.currentIndex = 0;
-                        root.selectionChanged(0);
+                hoverEnabled: true
+                cursorShape: isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+
+                property real startScreenX: 0
+                property real startScreenY: 0
+                property bool isDragging: false
+
+                onPressed: (mouse) => {
+                    isDragging = false;
+                    if (root.card && root.card.parent) {
+                        const p = mapToItem(root.card.parent, mouse.x, mouse.y);
+                        startScreenX = p.x;
+                        startScreenY = p.y;
+                    }
+                }
+
+                onPositionChanged: (mouse) => {
+                    if (pressed && root.card && root.card.parent) {
+                        const p = mapToItem(root.card.parent, mouse.x, mouse.y);
+                        if (!isDragging && (Math.abs(p.x - startScreenX) > 6 || Math.abs(p.y - startScreenY) > 6)) {
+                            isDragging = true;
+                            root.card.startMoving(startScreenX, startScreenY);
+                        }
+                        if (isDragging) {
+                            root.card.moveWidget(p.x, p.y);
+                        }
+                    }
+                }
+
+                onReleased: (mouse) => {
+                    if (isDragging && root.card) {
+                        isDragging = false;
+                        root.card.stopMoving();
+                    } else if (!isDragging) {
+                        if (root.currentIndex !== 0) {
+                            root.currentIndex = 0;
+                            root.selectionChanged(0);
+                        }
+                    }
+                }
+
+                onCanceled: {
+                    if (isDragging && root.card) {
+                        isDragging = false;
+                        root.card.stopMoving();
                     }
                 }
             }
@@ -77,12 +119,53 @@ Rectangle {
             }
 
             MouseArea {
+                id: weekArea
                 anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    if (root.currentIndex !== 1) {
-                        root.currentIndex = 1;
-                        root.selectionChanged(1);
+                hoverEnabled: true
+                cursorShape: isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+
+                property real startScreenX: 0
+                property real startScreenY: 0
+                property bool isDragging: false
+
+                onPressed: (mouse) => {
+                    isDragging = false;
+                    if (root.card && root.card.parent) {
+                        const p = mapToItem(root.card.parent, mouse.x, mouse.y);
+                        startScreenX = p.x;
+                        startScreenY = p.y;
+                    }
+                }
+
+                onPositionChanged: (mouse) => {
+                    if (pressed && root.card && root.card.parent) {
+                        const p = mapToItem(root.card.parent, mouse.x, mouse.y);
+                        if (!isDragging && (Math.abs(p.x - startScreenX) > 6 || Math.abs(p.y - startScreenY) > 6)) {
+                            isDragging = true;
+                            root.card.startMoving(startScreenX, startScreenY);
+                        }
+                        if (isDragging) {
+                            root.card.moveWidget(p.x, p.y);
+                        }
+                    }
+                }
+
+                onReleased: (mouse) => {
+                    if (isDragging && root.card) {
+                        isDragging = false;
+                        root.card.stopMoving();
+                    } else if (!isDragging) {
+                        if (root.currentIndex !== 1) {
+                            root.currentIndex = 1;
+                            root.selectionChanged(1);
+                        }
+                    }
+                }
+
+                onCanceled: {
+                    if (isDragging && root.card) {
+                        isDragging = false;
+                        root.card.stopMoving();
                     }
                 }
             }
