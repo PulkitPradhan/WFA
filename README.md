@@ -1,4 +1,5 @@
-# Caelestia Desktop Widgets
+# WIDGETS FOR ALL
+(Caelestia Desktop Widgets)
 
 <div align="center">
 
