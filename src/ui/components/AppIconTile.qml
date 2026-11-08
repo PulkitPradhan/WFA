@@ -73,21 +73,6 @@ Rectangle {
                 source: Quickshell.iconPath(root.icon, root.fallback)
                 implicitSize: root.iconSize
             }
-
-            // Subtle Running Indicator Accent Dot
-            Rectangle {
-                visible: root.running
-                width: 7
-                height: 7
-                radius: Theme.rounding.full
-                color: Theme.primary
-                border.color: Theme.surfaceContainer
-                border.width: 1.5
-                anchors.bottom: parent.bottom
-                anchors.right: parent.right
-                anchors.bottomMargin: -1
-                anchors.rightMargin: -1
-            }
         }
 
         StyledText {

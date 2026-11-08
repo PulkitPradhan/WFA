@@ -1,0 +1,2 @@
+singleton Weather 1.0 WeatherService.qml
+singleton ScreenTime 1.0 ScreenTimeService.qml

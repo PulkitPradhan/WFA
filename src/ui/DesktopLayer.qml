@@ -7,6 +7,7 @@ import Quickshell.Wayland
 import Quickshell.Widgets
 import Quickshell.Services.Mpris
 import "../theme"
+import "../services"
 import "components"
 
 PanelWindow {
@@ -63,33 +64,69 @@ PanelWindow {
     }
     property var currentTime: new Date()
 
-    // Native MPRIS discovery for Spotify
-    readonly property var activePlayers: Mpris.players.values
-    readonly property MprisPlayer spotifyPlayer: {
-        for (let i = 0; i < activePlayers.length; i++) {
-            const p = activePlayers[i];
-            if (p && p.identity && p.identity.toLowerCase().includes("spotify")) {
-                return p;
-            }
-        }
-        return activePlayers.length > 0 ? activePlayers[0] : null;
-    }
+    // Weather expansion mode
+    property bool showWeather: false
 
-    readonly property bool isPlaying: spotifyPlayer
-        ? (spotifyPlayer.playbackState === MprisPlaybackState.Playing)
+    // ==========================================
+    // DYNAMIC MULTI-SOURCE MEDIA PLAYER ENGINE
+    // ==========================================
+    readonly property var playerList: Mpris.players.values
+    readonly property int playerCount: playerList ? playerList.length : 0
+    property int currentPlayerIndex: 0
+    readonly property int clampedPlayerIndex: playerCount > 0 ? Math.min(Math.max(0, currentPlayerIndex), playerCount - 1) : 0
+    readonly property MprisPlayer currentPlayer: playerCount > 0 ? playerList[clampedPlayerIndex] : null
+
+    readonly property bool isPlaying: currentPlayer
+        ? (currentPlayer.playbackState === MprisPlaybackState.Playing)
         : false
 
-    readonly property string trackTitle: (spotifyPlayer && spotifyPlayer.trackTitle)
-        ? spotifyPlayer.trackTitle
-        : "leaveamsg"
+    readonly property string trackTitle: (currentPlayer && currentPlayer.trackTitle && currentPlayer.trackTitle.length > 0)
+        ? currentPlayer.trackTitle
+        : "No Media Playing"
 
-    readonly property string trackArtist: (spotifyPlayer && spotifyPlayer.trackArtist)
-        ? spotifyPlayer.trackArtist
-        : "morgue • Spotify"
+    readonly property string trackArtist: (currentPlayer && currentPlayer.trackArtist && currentPlayer.trackArtist.length > 0)
+        ? currentPlayer.trackArtist
+        : (currentPlayer ? getPlayerIdentity(currentPlayer) : "Idle")
 
-    readonly property string trackArtUrl: (spotifyPlayer && spotifyPlayer.trackArtUrl)
-        ? spotifyPlayer.trackArtUrl
+    readonly property string trackArtUrl: (currentPlayer && currentPlayer.trackArtUrl)
+        ? currentPlayer.trackArtUrl
         : ""
+
+    readonly property real playerVolume: (currentPlayer && currentPlayer.volume !== undefined)
+        ? currentPlayer.volume
+        : 1.0
+
+    property real lastNonZeroVolume: 1.0
+
+    readonly property int loopState: (currentPlayer && currentPlayer.loopState !== undefined)
+        ? currentPlayer.loopState
+        : 0
+
+    readonly property bool isShuffle: (currentPlayer && currentPlayer.shuffle !== undefined)
+        ? currentPlayer.shuffle
+        : false
+
+    function getPlayerIdentity(p: MprisPlayer): string {
+        if (!p || !p.identity) return "Media Player";
+        const id = p.identity.toLowerCase();
+        if (id.includes("spotify")) return "Spotify";
+        if (id.includes("chromium")) return "Chromium";
+        if (id.includes("brave")) return "Brave";
+        if (id.includes("firefox")) return "Firefox";
+        if (id.includes("mpv")) return "MPV";
+        if (id.includes("vlc")) return "VLC";
+        return p.identity;
+    }
+
+    function getPlayerIcon(p: MprisPlayer): string {
+        if (!p || !p.identity) return "multimedia-player";
+        const id = p.identity.toLowerCase();
+        if (id.includes("spotify")) return "spotify-client";
+        if (id.includes("chromium")) return "chromium";
+        if (id.includes("brave")) return "brave-desktop";
+        if (id.includes("firefox")) return "firefox";
+        return "multimedia-player";
+    }
 
     // Live position tracking for MPRIS player
     Timer {
@@ -97,27 +134,69 @@ PanelWindow {
         running: win.isPlaying
         repeat: true
         onTriggered: {
-            if (win.spotifyPlayer) {
-                win.spotifyPlayer.positionChanged();
+            if (win.currentPlayer) {
+                win.currentPlayer.positionChanged();
             }
         }
     }
 
-    readonly property real trackPosSec: {
-        const p = win.spotifyPlayer;
-        if (!p || !p.position) return 84; // fallback preview 1:24
-        return p.position > 100000 ? (p.position / 1000000) : p.position;
-    }
+    readonly property real trackPosSec: win.currentPlayer?.position ?? 0
+    readonly property real trackLenSec: win.currentPlayer?.length ?? 0
 
-    readonly property real trackLenSec: {
-        const p = win.spotifyPlayer;
-        if (!p || !p.length) return 225; // fallback preview 3:45
-        return p.length > 100000 ? (p.length / 1000000) : p.length;
-    }
+    property bool isDraggingSeek: false
+    property real dragSeekPos: 0.0
 
     readonly property real trackProgress: (trackLenSec > 0)
         ? Math.min(1.0, Math.max(0.0, trackPosSec / trackLenSec))
-        : 0.37
+        : 0.0
+
+    readonly property real displayProgress: isDraggingSeek
+        ? (trackLenSec > 0 ? Math.min(1.0, Math.max(0.0, dragSeekPos / trackLenSec)) : 0.0)
+        : trackProgress
+
+    function seekTo(targetSeconds: real): void {
+        if (!win.currentPlayer || win.trackLenSec <= 0) return;
+        const clamped = Math.max(0.0, Math.min(win.trackLenSec, targetSeconds));
+        if (win.currentPlayer.canSeek) {
+            win.currentPlayer.position = clamped;
+        } else {
+            Quickshell.execDetached(["playerctl", "-p", win.currentPlayer.identity || "spotify", "position", String(clamped)]);
+        }
+    }
+
+    function togglePlayPause(): void {
+        if (win.currentPlayer) {
+            if (win.currentPlayer.canTogglePlaying) {
+                win.currentPlayer.togglePlaying();
+            } else if (win.isPlaying && win.currentPlayer.canPause) {
+                win.currentPlayer.pause();
+            } else if (!win.isPlaying && win.currentPlayer.canPlay) {
+                win.currentPlayer.play();
+            } else {
+                Quickshell.execDetached(["playerctl", "-p", win.currentPlayer.identity || "spotify", "play-pause"]);
+            }
+        } else {
+            Quickshell.execDetached(["playerctl", "-p", "spotify", "play-pause"]);
+        }
+    }
+
+    function nextTrack(): void {
+        if (win.currentPlayer) {
+            if (win.currentPlayer.canGoNext) win.currentPlayer.next();
+            else Quickshell.execDetached(["playerctl", "-p", win.currentPlayer.identity || "spotify", "next"]);
+        } else {
+            Quickshell.execDetached(["playerctl", "-p", "spotify", "next"]);
+        }
+    }
+
+    function prevTrack(): void {
+        if (win.currentPlayer) {
+            if (win.currentPlayer.canGoPrevious) win.currentPlayer.previous();
+            else Quickshell.execDetached(["playerctl", "-p", win.currentPlayer.identity || "spotify", "previous"]);
+        } else {
+            Quickshell.execDetached(["playerctl", "-p", "spotify", "previous"]);
+        }
+    }
 
     function formatTime(secs: real): string {
         if (!secs || secs <= 0 || isNaN(secs)) return "0:00";
@@ -139,7 +218,7 @@ PanelWindow {
         spacing: 16
 
         // ==========================================
-        // LEFT COLUMN (Clock + Spotify + Screen Time)
+        // LEFT COLUMN (Clock/Weather + Multi-Source Media + Screen Time)
         // ==========================================
         Column {
             id: leftCol
@@ -147,58 +226,151 @@ PanelWindow {
             spacing: 14
 
             // ------------------------------------------
-            // 1. CLOCK & DATE COMPARTMENT
+            // 1. CLOCK & CAELESTIA WEATHER COMPARTMENT
             // ------------------------------------------
             Card {
                 id: timeCard
                 width: parent.width
-                height: 182
+                height: win.showWeather ? 320 : 182
                 radius: Theme.rounding.xl
                 hoverable: true
 
+                Behavior on height {
+                    NumberAnimation {
+                        duration: 250
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                // --- CLOCK MODE VIEW ---
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 20
                     spacing: 4
+                    visible: !win.showWeather
 
-                    // Subtle Top Bar: Weather Indicator
+                    // Top Bar: View Tabs + Live Weather Badge
                     RowLayout {
                         Layout.fillWidth: true
 
+                        // View mode pill: Clock / Weather
+                        Row {
+                            spacing: 4
+
+                            Rectangle {
+                                height: 26
+                                radius: Theme.rounding.full
+                                color: Theme.alpha(Theme.primary, 0.20)
+                                border.color: Theme.alpha(Theme.primary, 0.35)
+                                border.width: 1
+                                width: clockTabRow.implicitWidth + 16
+
+                                Row {
+                                    id: clockTabRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Icon {
+                                        name: "schedule"
+                                        size: 13
+                                        color: Theme.primary
+                                    }
+                                    StyledText {
+                                        text: "Time"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: Theme.primary
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: 26
+                                radius: Theme.rounding.full
+                                color: weatherTabArea.containsMouse ? Theme.alpha(Theme.surfaceVariant, 0.60) : Theme.alpha(Theme.surfaceVariant, 0.25)
+                                border.color: Theme.alpha(Theme.outlineVariant, 0.15)
+                                border.width: 1
+                                width: weatherTabRow.implicitWidth + 16
+
+                                Row {
+                                    id: weatherTabRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Icon {
+                                        name: Weather.icon
+                                        size: 13
+                                        color: Theme.textSecondary
+                                    }
+                                    StyledText {
+                                        text: "Weather"
+                                        font.pixelSize: 11
+                                        font.weight: Font.Medium
+                                        color: Theme.textSecondary
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: weatherTabArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: win.showWeather = true
+                                }
+                            }
+                        }
+
                         Item { Layout.fillWidth: true }
 
+                        // Live Weather Pill (Open-Meteo & IP-API data)
                         Rectangle {
-                            height: 24
+                            height: 26
                             radius: Theme.rounding.full
-                            color: Theme.alpha(Theme.surfaceVariant, 0.35)
-                            border.color: Theme.alpha(Theme.outlineVariant, 0.15)
+                            color: weatherBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.18) : Theme.alpha(Theme.surfaceVariant, 0.35)
+                            border.color: weatherBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.40) : Theme.alpha(Theme.outlineVariant, 0.15)
                             border.width: 1
-                            Layout.preferredWidth: weatherRow.implicitWidth + 18
+                            Layout.preferredWidth: weatherPillRow.implicitWidth + 18
+                            scale: weatherBadgeArea.pressed ? 0.94 : (weatherBadgeArea.containsMouse ? 1.03 : 1.0)
+
+                            Behavior on scale { NumberAnimation { duration: 120 } }
+                            Behavior on color { ColorAnimation { duration: 120 } }
 
                             Row {
-                                id: weatherRow
+                                id: weatherPillRow
                                 anchors.centerIn: parent
                                 spacing: 5
 
                                 Icon {
-                                    name: "wb_sunny"
+                                    name: Weather.icon
                                     size: 14
                                     color: Theme.primary
                                 }
 
                                 StyledText {
-                                    text: "24°C Clear"
+                                    text: Weather.city + " • " + Weather.temp + " " + Weather.condition
                                     font.pixelSize: 11
                                     font.weight: Font.Medium
+                                    color: weatherBadgeArea.containsMouse ? Theme.text : Theme.textSecondary
+                                }
+
+                                Icon {
+                                    name: "chevron_right"
+                                    size: 14
                                     color: Theme.textSecondary
                                 }
+                            }
+
+                            MouseArea {
+                                id: weatherBadgeArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: win.showWeather = true
                             }
                         }
                     }
 
                     Item { Layout.fillHeight: true }
 
-                    // Prominent Caelestia Typography Clock (Using Caelestia's Rubik clock token)
+                    // Prominent Caelestia Typography Clock
                     RowLayout {
                         Layout.alignment: Qt.AlignLeft
                         spacing: 16
@@ -274,31 +446,584 @@ PanelWindow {
 
                     Item { Layout.fillHeight: true }
                 }
+
+                // --- CAELESTIA NATIVE WEATHER VIEW ---
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 10
+                    visible: win.showWeather
+
+                    // Top Bar: Back to Clock + Sunrise & Sunset
+                    RowLayout {
+                        Layout.fillWidth: true
+
+                        // Return to Time Tab Pill
+                        Rectangle {
+                            height: 26
+                            radius: Theme.rounding.full
+                            color: backToTimeArea.containsMouse ? Theme.alpha(Theme.primary, 0.22) : Theme.alpha(Theme.surfaceVariant, 0.40)
+                            border.color: Theme.alpha(Theme.outlineVariant, 0.20)
+                            border.width: 1
+                            width: backRow.implicitWidth + 16
+
+                            Row {
+                                id: backRow
+                                anchors.centerIn: parent
+                                spacing: 4
+                                Icon {
+                                    name: "arrow_back"
+                                    size: 13
+                                    color: Theme.primary
+                                }
+                                StyledText {
+                                    text: "Clock"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: Theme.text
+                                }
+                            }
+
+                            MouseArea {
+                                id: backToTimeArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: win.showWeather = false
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Sunrise & Sunset Indicators
+                        Row {
+                            spacing: 12
+
+                            Row {
+                                spacing: 4
+                                Icon {
+                                    name: "wb_twilight"
+                                    size: 14
+                                    color: Theme.tertiary
+                                }
+                                StyledText {
+                                    text: Weather.sunrise
+                                    font.pixelSize: 11
+                                    font.weight: Font.Medium
+                                    color: Theme.textSecondary
+                                }
+                            }
+
+                            Row {
+                                spacing: 4
+                                Icon {
+                                    name: "bedtime"
+                                    size: 14
+                                    color: Theme.tertiary
+                                }
+                                StyledText {
+                                    text: Weather.sunset
+                                    font.pixelSize: 11
+                                    font.weight: Font.Medium
+                                    color: Theme.textSecondary
+                                }
+                            }
+                        }
+                    }
+
+                    // Weather Hero Header Row: City + Big Temp & Icon + Condition
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 14
+
+                        ColumnLayout {
+                            spacing: 2
+                            StyledText {
+                                text: Weather.city
+                                font.pixelSize: 22
+                                font.weight: Font.Bold
+                                color: Theme.text
+                            }
+                            StyledText {
+                                text: Qt.formatDate(win.currentTime, "dddd, MMMM d")
+                                font.pixelSize: 12
+                                color: Theme.textSecondary
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        RowLayout {
+                            spacing: 12
+
+                            Icon {
+                                name: Weather.icon
+                                size: 44
+                                color: Theme.primaryFixed
+                            }
+
+                            ColumnLayout {
+                                spacing: 0
+
+                                Row {
+                                    spacing: 4
+                                    StyledText {
+                                        text: Weather.temp
+                                        font.pixelSize: 32
+                                        font.weight: Font.Bold
+                                        color: Theme.primary
+                                    }
+
+                                    // Unit Toggle Pill (°F / °C)
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        height: 18
+                                        width: 28
+                                        radius: Theme.rounding.full
+                                        color: unitArea.containsMouse ? Theme.alpha(Theme.primary, 0.20) : Theme.alpha(Theme.surfaceVariant, 0.40)
+                                        border.color: Theme.alpha(Theme.outlineVariant, 0.20)
+                                        border.width: 1
+
+                                        StyledText {
+                                            anchors.centerIn: parent
+                                            text: Weather.useFahrenheit ? "°C" : "°F"
+                                            font.pixelSize: 9
+                                            font.weight: Font.Bold
+                                            color: Theme.textSecondary
+                                        }
+
+                                        MouseArea {
+                                            id: unitArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: Weather.toggleUnit()
+                                        }
+                                    }
+                                }
+
+                                StyledText {
+                                    text: Weather.condition
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                    color: Theme.textSecondary
+                                }
+                            }
+                        }
+                    }
+
+                    // 3 Weather Stats Cards: Humidity | Feels Like | Wind
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        // Humidity Card
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 38
+                            radius: Theme.rounding.md
+                            color: Theme.alpha(Theme.surfaceVariant, 0.40)
+                            border.color: Theme.alpha(Theme.outlineVariant, 0.15)
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Icon {
+                                    name: "water_drop"
+                                    size: 15
+                                    color: Theme.secondary
+                                }
+                                StyledText {
+                                    text: "Humidity " + Weather.humidity + "%"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Medium
+                                    color: Theme.text
+                                }
+                            }
+                        }
+
+                        // Feels Like Card
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 38
+                            radius: Theme.rounding.md
+                            color: Theme.alpha(Theme.surfaceVariant, 0.40)
+                            border.color: Theme.alpha(Theme.outlineVariant, 0.15)
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Icon {
+                                    name: "thermostat"
+                                    size: 15
+                                    color: Theme.primary
+                                }
+                                StyledText {
+                                    text: "Feels " + Weather.feelsLike
+                                    font.pixelSize: 11
+                                    font.weight: Font.Medium
+                                    color: Theme.text
+                                }
+                            }
+                        }
+
+                        // Wind Card
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 38
+                            radius: Theme.rounding.md
+                            color: Theme.alpha(Theme.surfaceVariant, 0.40)
+                            border.color: Theme.alpha(Theme.outlineVariant, 0.15)
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Icon {
+                                    name: "air"
+                                    size: 15
+                                    color: Theme.tertiary
+                                }
+                                StyledText {
+                                    text: Weather.windSpeed
+                                    font.pixelSize: 11
+                                    font.weight: Font.Medium
+                                    color: Theme.text
+                                }
+                            }
+                        }
+                    }
+
+                    // 7-Day Forecast Section Header
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        StyledText {
+                            text: "7-DAY FORECAST"
+                            font.pixelSize: 10
+                            font.weight: Font.Bold
+                            font.letterSpacing: 1.2
+                            color: Theme.textSecondary
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: Theme.alpha(Theme.outlineVariant, 0.15)
+                        }
+                    }
+
+                    // 7-Day Forecast Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        Repeater {
+                            model: Weather.forecast
+
+                            Rectangle {
+                                required property var modelData
+                                required property int index
+
+                                Layout.fillWidth: true
+                                height: 74
+                                radius: Theme.rounding.md
+                                color: Theme.alpha(Theme.surfaceVariant, 0.35)
+                                border.color: Theme.alpha(Theme.outlineVariant, 0.15)
+                                border.width: 1
+
+                                ColumnLayout {
+                                    anchors.centerIn: parent
+                                    spacing: 3
+
+                                    StyledText {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: modelData.day
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: index === 0 ? Theme.primary : Theme.text
+                                    }
+
+                                    Icon {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        name: modelData.icon
+                                        size: 16
+                                        color: Theme.primaryFixed
+                                    }
+
+                                    StyledText {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: modelData.tempRange || (modelData.minTemp + "° / " + modelData.maxTemp + "°")
+                                        font.pixelSize: 9
+                                        font.weight: Font.DemiBold
+                                        color: Theme.textSecondary
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // ------------------------------------------
-            // 2. SPOTIFY MINI-PLAYER (Native MPRIS)
+            // 2. DYNAMIC MULTI-SOURCE MEDIA PLAYER
             // ------------------------------------------
             Card {
                 id: musicCard
                 width: parent.width
-                height: 112
+                height: 148
                 radius: Theme.rounding.xl
                 hoverable: true
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 16
+                    anchors.margins: 14
                     spacing: 8
 
+                    // Top Bar: Player Source Badge + Source Dots + Looper & Volume Controls
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 14
+                        spacing: 8
+
+                        // Source Identity Badge
+                        Rectangle {
+                            height: 24
+                            radius: Theme.rounding.full
+                            color: sourceBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.18) : Theme.alpha(Theme.surfaceVariant, 0.50)
+                            border.color: sourceBadgeArea.containsMouse ? Theme.alpha(Theme.primary, 0.35) : Theme.alpha(Theme.outlineVariant, 0.15)
+                            border.width: 1
+                            Layout.preferredWidth: sourceRow.implicitWidth + 14
+                            scale: sourceBadgeArea.pressed ? 0.94 : (sourceBadgeArea.containsMouse ? 1.04 : 1.0)
+
+                            Behavior on scale { NumberAnimation { duration: 120 } }
+                            Behavior on color { ColorAnimation { duration: 120 } }
+
+                            Row {
+                                id: sourceRow
+                                anchors.centerIn: parent
+                                spacing: 5
+
+                                IconImage {
+                                    source: Quickshell.iconPath(win.getPlayerIcon(win.currentPlayer), "multimedia-player")
+                                    implicitSize: 13
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                StyledText {
+                                    text: win.getPlayerIdentity(win.currentPlayer)
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: sourceBadgeArea.containsMouse ? Theme.text : Theme.textSecondary
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+
+                            MouseArea {
+                                id: sourceBadgeArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (win.playerCount > 1) {
+                                        win.currentPlayerIndex = (win.clampedPlayerIndex + 1) % win.playerCount;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Navigation Dots for Active Audio Sources
+                        Row {
+                            spacing: 5
+                            Layout.alignment: Qt.AlignVCenter
+                            visible: win.playerCount > 1
+
+                            Repeater {
+                                model: win.playerCount
+
+                                Rectangle {
+                                    required property int index
+
+                                    width: index === win.clampedPlayerIndex ? 16 : 6
+                                    height: 6
+                                    radius: Theme.rounding.full
+                                    color: index === win.clampedPlayerIndex
+                                        ? Theme.primary
+                                        : (dotArea.containsMouse ? Theme.text : Theme.alpha(Theme.textSecondary, 0.35))
+
+                                    Behavior on width { NumberAnimation { duration: 150 } }
+                                    Behavior on color { ColorAnimation { duration: 120 } }
+
+                                    MouseArea {
+                                        id: dotArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: win.currentPlayerIndex = index
+                                    }
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Looper: Shuffle Toggle
+                        Rectangle {
+                            width: 28
+                            height: 28
+                            radius: Theme.rounding.full
+                            color: win.isShuffle
+                                ? Theme.alpha(Theme.primary, 0.22)
+                                : (shuffArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.70) : "transparent")
+                            border.color: win.isShuffle ? Theme.alpha(Theme.primary, 0.40) : "transparent"
+                            border.width: 1
+                            scale: shuffArea.pressed ? 0.90 : (shuffArea.containsMouse ? 1.06 : 1.0)
+
+                            Behavior on scale { NumberAnimation { duration: 120 } }
+                            Behavior on color { ColorAnimation { duration: 120 } }
+
+                            Icon {
+                                anchors.centerIn: parent
+                                name: "shuffle"
+                                size: 15
+                                color: win.isShuffle ? Theme.primary : Theme.textSecondary
+                            }
+
+                            MouseArea {
+                                id: shuffArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (win.currentPlayer) {
+                                        win.currentPlayer.shuffle = !win.currentPlayer.shuffle;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Looper: Repeat Mode (None / Track / Playlist)
+                        Rectangle {
+                            width: 28
+                            height: 28
+                            radius: Theme.rounding.full
+                            color: win.loopState > 0
+                                ? Theme.alpha(Theme.primary, 0.22)
+                                : (repArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.70) : "transparent")
+                            border.color: win.loopState > 0 ? Theme.alpha(Theme.primary, 0.40) : "transparent"
+                            border.width: 1
+                            scale: repArea.pressed ? 0.90 : (repArea.containsMouse ? 1.06 : 1.0)
+
+                            Behavior on scale { NumberAnimation { duration: 120 } }
+                            Behavior on color { ColorAnimation { duration: 120 } }
+
+                            Icon {
+                                anchors.centerIn: parent
+                                name: win.loopState === 1 ? "repeat_one" : "repeat"
+                                size: 15
+                                color: win.loopState > 0 ? Theme.primary : Theme.textSecondary
+                            }
+
+                            MouseArea {
+                                id: repArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (win.currentPlayer) {
+                                        win.currentPlayer.loopState = (win.currentPlayer.loopState + 1) % 3;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Volume Control for Active Source
+                        Row {
+                            spacing: 4
+                            Layout.alignment: Qt.AlignVCenter
+
+                            Icon {
+                                anchors.verticalCenter: parent.verticalCenter
+                                name: (win.playerVolume <= 0.01) ? "volume_off" : (win.playerVolume < 0.5 ? "volume_down" : "volume_up")
+                                size: 16
+                                color: volArea.containsMouse ? Theme.primary : Theme.textSecondary
+
+                                MouseArea {
+                                    id: volArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (!win.currentPlayer) return;
+                                        if (win.playerVolume > 0.01) {
+                                            win.lastNonZeroVolume = win.playerVolume;
+                                            win.currentPlayer.volume = 0.0;
+                                        } else {
+                                            win.currentPlayer.volume = win.lastNonZeroVolume || 1.0;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Volume Slider Bar
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 48
+                                height: 4
+                                radius: Theme.rounding.full
+                                color: Theme.alpha(Theme.secondaryContainer, 0.45)
+
+                                Rectangle {
+                                    width: parent.width * Math.min(1.0, Math.max(0.0, win.playerVolume))
+                                    height: parent.height
+                                    radius: Theme.rounding.full
+                                    color: Theme.primary
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onWheel: (wheel) => {
+                                        if (win.currentPlayer) {
+                                            const delta = wheel.angleDelta.y > 0 ? 0.05 : -0.05;
+                                            win.currentPlayer.volume = Math.max(0.0, Math.min(1.0, win.playerVolume + delta));
+                                        }
+                                    }
+                                    onClicked: (mouse) => {
+                                        if (win.currentPlayer) {
+                                            win.currentPlayer.volume = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                        }
+                                    }
+                                    onPositionChanged: (mouse) => {
+                                        if (pressed && win.currentPlayer) {
+                                            win.currentPlayer.volume = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                        }
+                                    }
+                                }
+                            }
+
+                            StyledText {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: Math.round(win.playerVolume * 100) + "%"
+                                font.pixelSize: 10
+                                font.family: Theme.fonts.familyMono
+                                color: Theme.textSecondary
+                            }
+                        }
+                    }
+
+                    // Middle Row: Album Artwork + Metadata + Playback Buttons
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
 
                         // Album Artwork Container
                         Rectangle {
-                            Layout.preferredWidth: 56
-                            Layout.preferredHeight: 56
+                            Layout.preferredWidth: 48
+                            Layout.preferredHeight: 48
                             radius: Theme.rounding.md
                             color: Theme.alpha(Theme.surfaceVariant, 0.45)
                             border.color: Theme.alpha(Theme.outlineVariant, 0.20)
@@ -317,7 +1042,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 visible: win.trackArtUrl.length === 0
                                 name: "music_note"
-                                size: 28
+                                size: 24
                                 color: Theme.primary
                             }
                         }
@@ -325,11 +1050,11 @@ PanelWindow {
                         // Track Title & Artist Metadata
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 3
+                            spacing: 2
 
                             StyledText {
                                 text: win.trackTitle
-                                font.pixelSize: 14
+                                font.pixelSize: 13
                                 font.weight: Font.DemiBold
                                 color: Theme.text
                                 elide: Text.ElideRight
@@ -338,22 +1063,22 @@ PanelWindow {
 
                             StyledText {
                                 text: win.trackArtist
-                                font.pixelSize: 12
+                                font.pixelSize: 11
                                 color: Theme.textSecondary
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
                         }
 
-                        // Playback Controls [<-] [play/pause] [->] (Native Caelestia IconButton styling)
+                        // Playback Controls [<-] [play/pause] [->]
                         Row {
-                            spacing: 8
+                            spacing: 6
                             Layout.alignment: Qt.AlignVCenter
 
                             // Previous Track Button
                             Rectangle {
-                                width: 36
-                                height: 36
+                                width: 32
+                                height: 32
                                 radius: Theme.rounding.full
                                 color: prevArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.90) : Theme.alpha(Theme.surfaceContainerHigh, 0.55)
                                 scale: prevArea.pressed ? 0.92 : (prevArea.containsMouse ? 1.06 : 1.0)
@@ -364,7 +1089,7 @@ PanelWindow {
                                 Icon {
                                     anchors.centerIn: parent
                                     name: "skip_previous"
-                                    size: 19
+                                    size: 17
                                     color: Theme.text
                                 }
 
@@ -373,17 +1098,14 @@ PanelWindow {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (win.spotifyPlayer) win.spotifyPlayer.previous();
-                                        else Quickshell.execDetached(["playerctl", "--player=spotify", "previous"]);
-                                    }
+                                    onClicked: win.prevTrack()
                                 }
                             }
 
                             // Play/Pause Accent Pill Button (Caelestia Stadium Morph)
                             Rectangle {
-                                width: 58
-                                height: 36
+                                width: 50
+                                height: 32
                                 radius: Theme.rounding.full
                                 color: Theme.primary
                                 scale: playArea.pressed ? 0.92 : (playArea.containsMouse ? 1.05 : 1.0)
@@ -393,7 +1115,7 @@ PanelWindow {
                                 Icon {
                                     anchors.centerIn: parent
                                     name: win.isPlaying ? "pause" : "play_arrow"
-                                    size: 20
+                                    size: 18
                                     color: Theme.textOnPrimary
                                 }
 
@@ -402,17 +1124,14 @@ PanelWindow {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (win.spotifyPlayer) win.spotifyPlayer.togglePlaying();
-                                        else Quickshell.execDetached(["playerctl", "--player=spotify", "play-pause"]);
-                                    }
+                                    onClicked: win.togglePlayPause()
                                 }
                             }
 
                             // Next Track Button
                             Rectangle {
-                                width: 36
-                                height: 36
+                                width: 32
+                                height: 32
                                 radius: Theme.rounding.full
                                 color: nextArea.containsMouse ? Theme.alpha(Theme.surfaceContainerHigh, 0.90) : Theme.alpha(Theme.surfaceContainerHigh, 0.55)
                                 scale: nextArea.pressed ? 0.92 : (nextArea.containsMouse ? 1.06 : 1.0)
@@ -423,7 +1142,7 @@ PanelWindow {
                                 Icon {
                                     anchors.centerIn: parent
                                     name: "skip_next"
-                                    size: 19
+                                    size: 17
                                     color: Theme.text
                                 }
 
@@ -432,43 +1151,76 @@ PanelWindow {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (win.spotifyPlayer) win.spotifyPlayer.next();
-                                        else Quickshell.execDetached(["playerctl", "--player=spotify", "next"]);
-                                    }
+                                    onClicked: win.nextTrack()
                                 }
                             }
                         }
                     }
 
-                    // Progress Track with Technical Timers (Matching Caelestia Media Bar)
+                    // Progress Track with Technical Timers & Full Seek Support (Click & Drag)
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
 
                         StyledText {
-                            text: win.formatTime(win.trackPosSec)
+                            text: win.formatTime(win.isDraggingSeek ? win.dragSeekPos : win.trackPosSec)
                             font.pixelSize: 10
                             font.family: Theme.fonts.familyMono
                             color: Theme.textSecondary
                         }
 
                         Rectangle {
+                            id: progTrack
                             Layout.fillWidth: true
-                            height: 4
+                            height: 6
                             radius: Theme.rounding.full
                             color: Theme.alpha(Theme.secondaryContainer, 0.45)
 
                             Rectangle {
-                                width: parent.width * win.trackProgress
+                                width: parent.width * win.displayProgress
                                 height: parent.height
                                 radius: Theme.rounding.full
                                 color: Theme.primary
 
                                 Behavior on width {
+                                    enabled: !win.isDraggingSeek
                                     NumberAnimation {
                                         duration: 250
                                         easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                preventStealing: true
+
+                                onPressed: (mouse) => {
+                                    if (win.trackLenSec > 0) {
+                                        win.isDraggingSeek = true;
+                                        const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                        win.dragSeekPos = pct * win.trackLenSec;
+                                    }
+                                }
+                                onPositionChanged: (mouse) => {
+                                    if (pressed && win.trackLenSec > 0) {
+                                        const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                        win.dragSeekPos = pct * win.trackLenSec;
+                                    }
+                                }
+                                onReleased: (mouse) => {
+                                    if (win.isDraggingSeek) {
+                                        win.isDraggingSeek = false;
+                                        const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                        win.seekTo(pct * win.trackLenSec);
+                                    }
+                                }
+                                onClicked: (mouse) => {
+                                    if (win.trackLenSec > 0) {
+                                        const pct = Math.max(0.0, Math.min(1.0, mouse.x / width));
+                                        win.seekTo(pct * win.trackLenSec);
                                     }
                                 }
                             }
@@ -490,14 +1242,14 @@ PanelWindow {
             Card {
                 id: screenTimeCard
                 width: parent.width
-                height: 298
+                height: 262
                 radius: Theme.rounding.xl
                 hoverable: true
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 12
+                    anchors.margins: 18
+                    spacing: 10
 
                     // Header Row with Title + Segmented Switch + Total Time Badge
                     RowLayout {
@@ -529,57 +1281,48 @@ PanelWindow {
 
                         // Total Duration Badge
                         Rectangle {
-                            height: 26
+                            height: 24
                             radius: Theme.rounding.full
-                            color: Theme.alpha(Theme.primary, 0.14)
-                            border.color: Theme.alpha(Theme.primary, 0.25)
+                            color: Theme.alpha(Theme.surfaceVariant, 0.45)
+                            border.color: Theme.alpha(Theme.outlineVariant, 0.15)
                             border.width: 1
                             Layout.preferredWidth: stTotalText.implicitWidth + 16
 
                             StyledText {
                                 id: stTotalText
                                 anchors.centerIn: parent
-                                text: win.screenTimeView === 0 ? "4h 28m" : "28h 15m"
+                                text: (win.screenTimeView === 0 ? ScreenTime.todayTotalFormatted : ScreenTime.weekTotalFormatted) || "0m"
                                 font.pixelSize: 11
+                                font.family: Theme.fonts.familySans
                                 font.weight: Font.DemiBold
                                 color: Theme.primary
                             }
                         }
                     }
 
-                    // Application Usage Rows (Filtered dynamically by Today/Week)
+                    // Application Usage Rows (Real data from ScreenTime service)
                     ColumnLayout {
                         Layout.fillWidth: true
-                        spacing: 10
+                        spacing: 9
 
                         Repeater {
-                            model: win.screenTimeView === 0 ? [
-                                { name: "Zen Browser", icon: "zen-browser", fallback: "web-browser", time: "2h 14m", pct: 0.50, color: Theme.primary },
-                                { name: "Visual Studio Code", icon: "vscode", fallback: "text-editor", time: "1h 18m", pct: 0.29, color: Theme.secondary },
-                                { name: "Kitty Terminal", icon: "kitty", fallback: "utilities-terminal", time: "38m", pct: 0.14, color: Theme.tertiary },
-                                { name: "Spotify", icon: "spotify", fallback: "audio-player", time: "18m", pct: 0.07, color: Theme.outline }
-                            ] : [
-                                { name: "Visual Studio Code", icon: "vscode", fallback: "text-editor", time: "12h 40m", pct: 0.45, color: Theme.primary },
-                                { name: "Zen Browser", icon: "zen-browser", fallback: "web-browser", time: "9h 20m", pct: 0.33, color: Theme.secondary },
-                                { name: "Kitty Terminal", icon: "kitty", fallback: "utilities-terminal", time: "4h 10m", pct: 0.15, color: Theme.tertiary },
-                                { name: "Spotify", icon: "spotify", fallback: "audio-player", time: "2h 05m", pct: 0.07, color: Theme.outline }
-                            ]
+                            model: win.screenTimeView === 0 ? ScreenTime.todayList : ScreenTime.weekList
 
                             ColumnLayout {
                                 required property var modelData
                                 Layout.fillWidth: true
-                                spacing: 4
+                                spacing: 3
 
                                 RowLayout {
                                     Layout.fillWidth: true
 
                                     IconImage {
-                                        source: Quickshell.iconPath(modelData.icon, modelData.fallback)
-                                        implicitSize: 18
+                                        source: modelData && modelData.icon ? Quickshell.iconPath(modelData.icon, modelData.fallback) : ""
+                                        implicitSize: 16
                                     }
 
                                     StyledText {
-                                        text: modelData.name
+                                        text: modelData && modelData.name ? modelData.name : ""
                                         font.pixelSize: 12
                                         font.weight: Font.Medium
                                         color: Theme.text
@@ -588,9 +1331,10 @@ PanelWindow {
                                     Item { Layout.fillWidth: true }
 
                                     StyledText {
-                                        text: modelData.time + " (" + Math.round(modelData.pct * 100) + "%)"
+                                        text: modelData && modelData.time ? (modelData.time + " (" + Math.round((modelData.pct || 0) * 100) + "%)") : ""
                                         font.pixelSize: 11
-                                        font.family: Theme.fonts.familyMono
+                                        font.family: Theme.fonts.familySans
+                                        font.weight: Font.Medium
                                         color: Theme.textSecondary
                                     }
                                 }
@@ -630,7 +1374,7 @@ PanelWindow {
         Card {
             id: appDrawerCard
             width: 530
-            // Height spans left column exact height: 182 + 14 + 112 + 14 + 298 = 620px
+            // Height spans left column exact height: 182 + 14 + 148 + 14 + 262 = 620px
             height: 620
             radius: Theme.rounding.xl
             hoverable: true
@@ -640,23 +1384,15 @@ PanelWindow {
                 anchors.margins: 20
                 spacing: 12
 
-                // Header Bar: Minimal & Native
+                // Header Bar: Clean & Native (Square dots icon removed per user request)
                 RowLayout {
                     Layout.fillWidth: true
 
-                    Row {
-                        spacing: 8
-                        Icon {
-                            name: "apps"
-                            size: 19
-                            color: Theme.primary
-                        }
-                        StyledText {
-                            text: "Applications"
-                            font.pixelSize: 14
-                            font.weight: Font.DemiBold
-                            color: Theme.text
-                        }
+                    StyledText {
+                        text: "Applications"
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+                        color: Theme.text
                     }
 
                     Item { Layout.fillWidth: true }
@@ -702,7 +1438,7 @@ PanelWindow {
                     }
                 }
 
-                // 4x3 Icon-First Grid (Large 50px Native Icons, Clean, Borderless)
+                // 4x3 Icon-First Grid (Real User Applications with Verified Icons)
                 GridLayout {
                     Layout.fillWidth: true
                     columns: 4
@@ -711,18 +1447,18 @@ PanelWindow {
 
                     Repeater {
                         model: [
-                            { name: "Zen Browser", icon: "zen-browser", fallback: "web-browser", exec: "zen-browser", running: true },
-                            { name: "Kitty", icon: "kitty", fallback: "utilities-terminal", exec: "kitty", running: true },
-                            { name: "VS Code", icon: "vscode", fallback: "text-editor", exec: "code", running: true },
-                            { name: "Discord", icon: "omarchy-discord", fallback: "chat", exec: "discord", running: false },
-                            { name: "Spotify", icon: "spotify", fallback: "audio-player", exec: "spotify", running: true },
-                            { name: "Obsidian", icon: "obsidian", fallback: "text-editor", exec: "obsidian", running: false },
-                            { name: "Files", icon: "thunar", fallback: "system-file-manager", exec: "thunar", running: false },
-                            { name: "Steam", icon: "steam", fallback: "applications-games", exec: "steam", running: false },
-                            { name: "Neovim", icon: "nvim", fallback: "utilities-terminal", exec: "kitty -e nvim", running: false },
-                            { name: "Brave", icon: "brave-browser", fallback: "web-browser", exec: "brave", running: false },
-                            { name: "OBS Studio", icon: "com.obsproject.Studio", fallback: "video-display", exec: "obs", running: false },
-                            { name: "Settings", icon: "org.gnome.Settings", fallback: "preferences-system", exec: "omarchy menu toggle", running: false }
+                            { name: "Brave", icon: "brave-desktop", fallback: "web-browser", exec: "brave" },
+                            { name: "Chromium", icon: "chromium", fallback: "web-browser", exec: "chromium" },
+                            { name: "VS Code", icon: "vscode", fallback: "text-editor", exec: "code" },
+                            { name: "Kitty", icon: "kitty", fallback: "utilities-terminal", exec: "kitty" },
+                            { name: "Spotify", icon: "spotify-client", fallback: "audio-player", exec: "spotify" },
+                            { name: "Discord", icon: "omarchy-discord", fallback: "chat", exec: "omarchy-launch-webapp https://discord.com/channels/@me" },
+                            { name: "Steam", icon: "steam", fallback: "applications-games", exec: "steam" },
+                            { name: "Obsidian", icon: "obsidian", fallback: "text-editor", exec: "obsidian" },
+                            { name: "Files", icon: "org.xfce.thunar", fallback: "system-file-manager", exec: "thunar" },
+                            { name: "OBS Studio", icon: "com.obsproject.Studio", fallback: "video-display", exec: "obs" },
+                            { name: "Antigravity", icon: "/home/erebusstride/.local/bin/Antigravity/Google-Antigravity-Icon-White.png", fallback: "utilities-terminal", exec: "/home/erebusstride/.local/bin/Antigravity/antigravity" },
+                            { name: "Aether", icon: "aether", fallback: "application-x-executable", exec: "aether" }
                         ]
 
                         AppIconTile {
@@ -731,7 +1467,6 @@ PanelWindow {
                             icon: modelData.icon
                             fallback: modelData.fallback
                             execCmd: modelData.exec
-                            running: modelData.running
                             iconSize: 50
                         }
                     }
