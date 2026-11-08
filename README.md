@@ -481,16 +481,16 @@ Application usage data is stored in `~/.local/state/caelestia-widgets/screentime
 ```json
 {
   "todayKey": "2026-11-08",
-  "todayTotal": 14520,
+  "todayTotal": x,
   "todayApps": {
-    "antigravity": 8420,
-    "chromium": 3800,
-    "kitty": 2300
+    "app1": x,
+    "app2": y,
+    "app3": z
   },
   "history": {
     "2026-11-07": {
-      "total": 28940,
-      "apps": { "antigravity": 18200, "code": 7400, "brave": 3340 }
+      "total": xyz,
+      "apps": { "app1": x, "app2": y, "app3": z }
     }
   }
 }
@@ -642,7 +642,7 @@ tail -f /tmp/caelestia-widgets.log
 ### Planned Features
 
 - [ ] **SQLite Storage Backend**: Migration path from JSON to a local SQLite database for multi-month trend analysis and query performance.
-- [ ] **Hardware Monitor Card**: CPU, GPU, RAM, and storage utilization gauges.
+- [ ] **Hardware Monitor Card**: CPU, GPU, RAM, and storage utilization gauges.(using Htop/Btop)
 - [ ] **Multi-Monitor Layouts**: Independent persistent layouts per connected output.
 - [ ] **Custom Shortcut Configurator**: In-widget visual editor to add and remove application drawer shortcuts.
 
